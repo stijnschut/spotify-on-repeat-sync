@@ -1,0 +1,23 @@
+{
+  "users": [
+    { "id": "you", "display_name": "You" },
+    { "id": "friend", "display_name": "Friend" },
+    { "id": "friend2", "display_name": "Friend2" }
+  ],
+  "playlists": [
+    {
+      "name": "you_and_friend",
+      "owner_user_id": "you",
+      "members": ["you", "friend"],
+      "max_total": 100,
+      "max_per_user": 50
+    },
+    {
+      "name": "with_friend2",
+      "owner_user_id": "you",
+      "members": ["you", "friend", "friend2"],
+      "max_total": 150,
+      "max_per_user": 50
+    }
+  ]
+}
