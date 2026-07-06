@@ -42,13 +42,17 @@ def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> 
     return response.json()["access_token"]
 
 
-def get_client_for_user(client_id: str, client_secret: str, refresh_token: str) -> spotipy.Spotify:
+def get_client_for_user(
+    client_id: str, client_secret: str, refresh_token: str
+) -> spotipy.Spotify:
     """Build a ready-to-use Spotify client authenticated as one person."""
     access_token = get_access_token(client_id, client_secret, refresh_token)
     return spotipy.Spotify(auth=access_token)
 
 
-def get_top_track_ids(sp: spotipy.Spotify, time_range: str = "short_term", limit: int = 30) -> list[str]:
+def get_top_track_ids(
+    sp: spotipy.Spotify, time_range: str = "short_term", limit: int = 30
+) -> list[str]:
     """
     The current user's top tracks over `time_range`
     ("short_term" ~4 weeks, "medium_term" ~6 months, "long_term" ~years).
@@ -64,12 +68,12 @@ def get_playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> list[str]:
     track_ids: list[str] = []
     results = sp.playlist_items(
         playlist_id,
-        fields="items(track(id)),next",
+        fields="items(item(id)),next",
         additional_types=["track"],
     )
     while True:
         for item in results["items"]:
-            track = item.get("track")
+            track = item.get("item")
             if track and track.get("id"):
                 track_ids.append(track["id"])
         if not results.get("next"):
