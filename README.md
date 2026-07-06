@@ -35,6 +35,7 @@ This only needs to happen once, for the whole project - not per person.
 2. **Create app**. Name/description don't matter.
 3. Under **Redirect URIs**: add `http://127.0.0.1:8888/callback`.
 4. Enable "Web API" under the requested APIs.
+5. Go to **User Management**, Add all users you want to sync with.
 5. Once created, you'll see **Client ID** and **Client Secret** (secret is behind "View client secret").
 
 ### 2. Set up the project
