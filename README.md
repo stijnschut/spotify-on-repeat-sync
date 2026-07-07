@@ -158,6 +158,7 @@ Prefer no limit at all ("infinity and beyond")? Just set `max_total` and `max_pe
 
 ## Troubleshooting
 
+- **Duplicates keep getting added to the shared playlist every run** — the delta log shows `+N` tracks even though they're already in the DB. This usually means the script can't read the playlist's current tracks. Since early 2025, Spotify's API uses `"item"` (not `"track"`) as the key in playlist item responses. Make sure `get_playlist_track_ids()` in `spotify_client.py` reads `item.get("item")` rather than `item.get("track")`.
 - **404/403 when reading a playlist** - if this happens on the *shared* playlist itself (not while fetching top tracks), check that `owner_user_id` is correct and that person has `playlist-modify-*` scopes (re-running `auth.py` usually fixes this).
 - **"Missing REFRESH_TOKEN_X in .env"** - that person hasn't (successfully) run `auth.py` yet.
 - **"Missing PLAYLIST_ID_X in .env"** - that playlist is missing its `PLAYLIST_ID_<NAME>` line in `.env` (see step 4 of the setup).
