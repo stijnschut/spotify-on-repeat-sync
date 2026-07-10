@@ -24,6 +24,10 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 
 # Spotify's documented max for one call to /me/top/tracks.
 MAX_TOP_TRACKS_LIMIT = 50
+# How many pages of top tracks to fetch (each page up to 50 tracks).
+# 2 pages = up to 100 tracks per user, giving enough unique material
+# to fill a 100-track playlist even when two users have significant overlap.
+TOP_TRACKS_PAGES = 2
 
 
 def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> str:
@@ -57,10 +61,28 @@ def get_top_track_ids(
     The current user's top tracks over `time_range`
     ("short_term" ~4 weeks, "medium_term" ~6 months, "long_term" ~years).
     "short_term" is the closest match to what On Repeat used to represent.
+
+    Fetches multiple pages (TOP_TRACKS_PAGES) to build a larger pool,
+    since two people's overlap can otherwise prevent reaching max_total.
+    Duplicates across pages are removed.
     """
-    limit = min(limit, MAX_TOP_TRACKS_LIMIT)
-    results = sp.current_user_top_tracks(time_range=time_range, limit=limit)
-    return [item["id"] for item in results["items"] if item and item.get("id")]
+    per_page = min(limit, MAX_TOP_TRACKS_LIMIT)
+    seen: set[str] = set()
+    results: list[str] = []
+    for page in range(TOP_TRACKS_PAGES):
+        offset = page * per_page
+        batch = sp.current_user_top_tracks(
+            time_range=time_range, limit=per_page, offset=offset
+        )
+        for item in batch.get("items", []):
+            tid = item.get("id") if item else None
+            if tid and tid not in seen:
+                seen.add(tid)
+                results.append(tid)
+        # Stop early if Spotify returned fewer tracks than requested (last page)
+        if len(batch.get("items", [])) < per_page:
+            break
+    return results
 
 
 def get_playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> list[str]:

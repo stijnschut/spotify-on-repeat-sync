@@ -29,9 +29,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from database import TrackDatabase
+from dotenv import load_dotenv
 from spotify_client import (
     add_tracks,
     get_client_for_user,
@@ -71,7 +70,9 @@ def get_user_credentials(user_id: str) -> tuple[str, str, str]:
     env_key = f"REFRESH_TOKEN_{user_id.upper()}"
     refresh_token = os.environ.get(env_key)
     if not refresh_token:
-        raise RuntimeError(f"Missing {env_key} in .env - has '{user_id}' run auth.py yet?")
+        raise RuntimeError(
+            f"Missing {env_key} in .env - has '{user_id}' run auth.py yet?"
+        )
     return client_id, client_secret, refresh_token
 
 
@@ -85,7 +86,9 @@ def get_playlist_id(playlist_name: str) -> str:
     env_key = "PLAYLIST_ID_" + re.sub(r"[^A-Za-z0-9]", "_", playlist_name).upper()
     playlist_id = os.environ.get(env_key)
     if not playlist_id:
-        raise RuntimeError(f"Missing {env_key} in .env - add the shared playlist's link/ID there")
+        raise RuntimeError(
+            f"Missing {env_key} in .env - add the shared playlist's link/ID there"
+        )
     return playlist_id
 
 
@@ -127,12 +130,19 @@ def add_new_track(
         if not oldest:
             logger.info(
                 "  %s is at their cap (%d/%d) and all of them are fresh today - skipping new track %s",
-                user_id, user_count, max_per_user, track_id,
+                user_id,
+                user_count,
+                max_per_user,
+                track_id,
             )
             return
         logger.info(
             "  %s at cap (%d/%d): swapping out %s for %s",
-            user_id, user_count, max_per_user, oldest["track_id"], track_id,
+            user_id,
+            user_count,
+            max_per_user,
+            oldest["track_id"],
+            track_id,
         )
         if not dry_run:
             db.remove_track(playlist_name, oldest["track_id"])
@@ -145,12 +155,20 @@ def add_new_track(
         if not oldest:
             logger.info(
                 "  Playlist full (%d/%d) and everything is fresh today - skipping new track %s from %s",
-                total_count, max_total, track_id, user_id,
+                total_count,
+                max_total,
+                track_id,
+                user_id,
             )
             return
         logger.info(
             "  Playlist full (%d/%d): swapping out %s (from %s) for %s (from %s)",
-            total_count, max_total, oldest["track_id"], oldest["source_user"], track_id, user_id,
+            total_count,
+            max_total,
+            oldest["track_id"],
+            oldest["source_user"],
+            track_id,
+            user_id,
         )
         if not dry_run:
             db.remove_track(playlist_name, oldest["track_id"])
@@ -162,7 +180,9 @@ def add_new_track(
         db.add_track(playlist_name, track_id, user_id, today)
 
 
-def sync_playlist(playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, today: str, dry_run: bool) -> None:
+def sync_playlist(
+    playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, today: str, dry_run: bool
+) -> None:
     name = playlist_cfg["name"]
     max_total = playlist_cfg["max_total"]
     max_per_user = playlist_cfg["max_per_user"]
@@ -180,7 +200,10 @@ def sync_playlist(playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, toda
     for user_id in playlist_cfg["members"]:
         user_cfg = users_by_id.get(user_id)
         if not user_cfg:
-            logger.warning("  Member '%s' isn't defined under 'users' in config.json - skipping", user_id)
+            logger.warning(
+                "  Member '%s' isn't defined under 'users' in config.json - skipping",
+                user_id,
+            )
             continue
 
         try:
@@ -191,7 +214,10 @@ def sync_playlist(playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, toda
             track_ids = get_top_track_ids(sp, time_range=time_range, limit=limit)
             logger.info("  %s: %d top tracks (%s)", user_id, len(track_ids), time_range)
         except Exception:
-            logger.exception("  Failed to read top tracks for %s - skipping this user for this run", user_id)
+            logger.exception(
+                "  Failed to read top tracks for %s - skipping this user for this run",
+                user_id,
+            )
             continue
 
         for track_id in track_ids:
@@ -203,8 +229,22 @@ def sync_playlist(playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, toda
 
     # Pass 2: now try to fit each new track in, evicting the stalest
     # qualifying track only if needed - see add_new_track().
+    # Process candidates round-robin per user so that no single user's
+    # tracks get priority when claiming a shared song's source_user slot.
+    by_user: dict[str, list[str]] = {}
     for track_id, user_id in candidates:
-        add_new_track(db, name, track_id, user_id, max_total, max_per_user, today, dry_run)
+        by_user.setdefault(user_id, []).append(track_id)
+    _round = 0
+    while any(by_user.values()):
+        for uid in list(by_user.keys()):
+            if by_user[uid]:
+                tid = by_user[uid].pop(0)
+                add_new_track(
+                    db, name, tid, uid, max_total, max_per_user, today, dry_run
+                )
+        _round += 1
+        if _round > 200:
+            break
 
     # Push the resulting desired state to the real playlist as a delta,
     # authenticated as whoever owns/manages that shared playlist.
@@ -219,20 +259,32 @@ def sync_playlist(playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, toda
         client_id, client_secret, refresh_token = get_user_credentials(owner_id)
         sp_owner = get_client_for_user(client_id, client_secret, refresh_token)
     except Exception:
-        logger.exception("  Couldn't authenticate playlist owner '%s' - cannot push updates to Spotify", owner_id)
+        logger.exception(
+            "  Couldn't authenticate playlist owner '%s' - cannot push updates to Spotify",
+            owner_id,
+        )
         return
 
     desired = db.get_all_track_ids(name)
     try:
         current = get_playlist_track_ids(sp_owner, spotify_playlist_id)
     except Exception:
-        logger.exception("  Couldn't read the current tracks of playlist '%s' on Spotify - skipping push", name)
+        logger.exception(
+            "  Couldn't read the current tracks of playlist '%s' on Spotify - skipping push",
+            name,
+        )
         return
 
     to_add = [t for t in desired if t not in current]
     to_remove = [t for t in current if t not in desired]
 
-    logger.info("  Delta for '%s': +%d / -%d (target size %d)", name, len(to_add), len(to_remove), len(desired))
+    logger.info(
+        "  Delta for '%s': +%d / -%d (target size %d)",
+        name,
+        len(to_add),
+        len(to_remove),
+        len(desired),
+    )
 
     if dry_run:
         logger.info("  [dry-run] Not touching the real Spotify playlist")
@@ -245,24 +297,43 @@ def sync_playlist(playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, toda
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Sync shared Spotify playlists from everyone's top tracks")
-    parser.add_argument("--config", default=str(BASE_DIR / "config.json"), help="Path to config.json")
-    parser.add_argument("--db", default=str(BASE_DIR / "spotify_sync.db"), help="Path to the SQLite database file")
-    parser.add_argument("--dry-run", action="store_true", help="Log what would happen without changing anything")
+    parser = argparse.ArgumentParser(
+        description="Sync shared Spotify playlists from everyone's top tracks"
+    )
+    parser.add_argument(
+        "--config", default=str(BASE_DIR / "config.json"), help="Path to config.json"
+    )
+    parser.add_argument(
+        "--db",
+        default=str(BASE_DIR / "spotify_sync.db"),
+        help="Path to the SQLite database file",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Log what would happen without changing anything",
+    )
     args = parser.parse_args()
 
     setup_logging()
     load_dotenv(BASE_DIR / ".env")
 
-    if not os.environ.get("SPOTIFY_CLIENT_ID") or not os.environ.get("SPOTIFY_CLIENT_SECRET"):
-        logger.error("SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET missing - copy .env.example to .env and fill them in")
+    if not os.environ.get("SPOTIFY_CLIENT_ID") or not os.environ.get(
+        "SPOTIFY_CLIENT_SECRET"
+    ):
+        logger.error(
+            "SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET missing - copy .env.example to .env and fill them in"
+        )
         sys.exit(1)
 
     logger.info("=== Sync run started%s ===", " (dry-run)" if args.dry_run else "")
 
     config_path = Path(args.config)
     if not config_path.exists():
-        logger.error("Config not found: %s (copy config.example.json to config.json)", config_path)
+        logger.error(
+            "Config not found: %s (copy config.example.json to config.json)",
+            config_path,
+        )
         sys.exit(1)
 
     config = load_config(config_path)
@@ -274,7 +345,10 @@ def main() -> None:
         try:
             sync_playlist(playlist_cfg, users_by_id, db, today, args.dry_run)
         except Exception:
-            logger.exception("Playlist '%s' failed - continuing with the next one", playlist_cfg.get("name"))
+            logger.exception(
+                "Playlist '%s' failed - continuing with the next one",
+                playlist_cfg.get("name"),
+            )
 
     logger.info("=== Sync run finished ===")
 

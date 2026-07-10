@@ -1,8 +1,8 @@
 {
   "users": [
-    { "id": "you", "display_name": "You" },
-    { "id": "friend", "display_name": "Friend" },
-    { "id": "friend2", "display_name": "Friend2" }
+    { "id": "you", "display_name": "You", "top_tracks_limit": 50 },
+    { "id": "friend", "display_name": "Friend", "top_tracks_limit": 50 },
+    { "id": "friend2", "display_name": "Friend2", "top_tracks_limit": 50 }
   ],
   "playlists": [
     {

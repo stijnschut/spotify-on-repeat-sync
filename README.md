@@ -9,12 +9,15 @@ Combines everyone's "songs you love right now" into one (or more) shared playlis
 For every playlist in `config.json`:
 
 1. **Read** - pulls each member's top tracks over the last ~4 weeks (`short_term`).
+   To provide enough unique material for a full playlist even when members
+   have overlapping taste, the script fetches **100 tracks per person**
+   (2 pages of 50 via Spotify's `offset` parameter).
 2. **Track** - a local SQLite database (`spotify_sync.db`) keeps, per track, who added it and when it was last seen in someone's top tracks (`last_seen`).
    - Track already in the database? -> `last_seen` gets bumped to today.
    - New track, and there's room? -> added.
    - New track, but that person is at their `max_per_user`? -> the oldest track from **that same person** (that wasn't seen again today) gets evicted.
    - New track, playlist is at `max_total`? -> the oldest track from **anyone** (that wasn't seen again today) gets evicted.
-   - Important: this only happens **after** everyone's top tracks have been read. That way nobody loses a slot just because someone else happened to be processed earlier - a track only gets replaced if it's genuinely no longer in anyone's top tracks.
+   - Important: this only happens **after** everyone's top tracks have been read and candidates are processed **round-robin** (one track per user,轮流). That way nobody loses a slot just because someone else happened to be processed earlier, and no single user always gets first pick of shared tracks.
 3. **Update** - the real Spotify playlist gets updated with a delta: only add what's new and remove what fell off. The order of everything else stays untouched.
 
 Adding a new playlist combination (e.g. with a third friend) = a new block in `config.json`, no code changes. See `config.example.json` for an example with two playlists.
@@ -89,8 +92,8 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 ```json
 {
   "users": [
-    { "id": "you", "display_name": "You" },
-    { "id": "friend", "display_name": "Friend" }
+    { "id": "you", "display_name": "You", "top_tracks_limit": 50 },
+    { "id": "friend", "display_name": "Friend", "top_tracks_limit": 50 }
   ],
   "playlists": [
     {
@@ -106,7 +109,7 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 
 - `owner_user_id` must be someone who's logged in via `auth.py` - their account is used to actually edit the playlist (adding/removing tracks).
 - `max_per_user` is a fairness cap (no one person can fill the whole playlist), `max_total` is the real ceiling. `max_per_user × number of members` can be higher than `max_total` just fine - `max_total` simply applies as the hard limit.
-- Optional, per person under `users`: `"top_tracks_time_range"` (`short_term`/`medium_term`/`long_term`, default `short_term`) and `"top_tracks_limit"` (default 30, max 50) if you want to tune someone's window.
+- Optional, per person under `users`: `"top_tracks_time_range"` (`short_term`/`medium_term`/`long_term`, default `short_term`) and `"top_tracks_limit"` (default 30, max 50; **recommended**: 50 for a 2-person playlist of 100) if you want to tune someone's window. Regardless of this limit, the script always fetches **2 pages** (via `offset`) so the effective pool is up to `2 × limit` tracks per user - enough to fill a 100-track playlist even with significant overlap.
 
 ### 6. Test it
 
@@ -171,4 +174,5 @@ Prefer no limit at all ("infinity and beyond")? Just set `max_total` and `max_pe
 What keeps this deliberately simple, so it's easy to grow:
 - Adding a new source = a new user + optionally a new playlist block in `config.json`. `sync.py` itself never needs to change for more people or more playlist combinations.
 - `spotify_client.py`, `database.py`, and `sync.py` are decoupled - if you ever want a different data source (e.g. a different `time_range`, or something else entirely), you only need to change `get_top_track_ids()` in `spotify_client.py`.
+- The number of pages fetched is controlled by `TOP_TRACKS_PAGES` in `spotify_client.py` (default: 2). Tune this if members have very broad or very narrow listening habits.
 - Possible next steps: auto-creating playlists instead of doing it by hand, or a small overview (standalone script or webpage) showing what's currently in each database.
