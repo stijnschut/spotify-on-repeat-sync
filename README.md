@@ -1,6 +1,6 @@
 # Spotify On Repeat Sync
 
-Combines everyone's "songs you love right now" into one (or more) shared playlist(s), automatically, refreshed every day. Runs as a standalone script on your Synology via Task Scheduler.
+Combines everyone's "songs you love right now" into one (or more) shared playlist(s), automatically. Runs as a standalone script on your computer or NAS.
 
 > **Important - why "top tracks" instead of "On Repeat"?** Since Spotify's February 2026 API changes, no app can read the contents of any of Spotify's own algorithmic playlists anymore (On Repeat, Discover Weekly, Release Radar, Daily Mixes) - not even the account owner. That's a deliberate, permanent restriction on Spotify's side, not something we can work around. Instead, this project uses `/me/top/tracks` with `time_range=short_term` (~last 4 weeks) - Spotify's own "top tracks" endpoint, which does still work and is the closest available stand-in for On Repeat.
 
@@ -17,7 +17,7 @@ For every playlist in `config.json`:
    - New track, and there's room? -> added.
    - New track, but that person is at their `max_per_user`? -> the oldest track from **that same person** (that wasn't seen again today) gets evicted.
    - New track, playlist is at `max_total`? -> the oldest track from **anyone** (that wasn't seen again today) gets evicted.
-   - Important: this only happens **after** everyone's top tracks have been read and candidates are processed **round-robin** (one track per user,轮流). That way nobody loses a slot just because someone else happened to be processed earlier, and no single user always gets first pick of shared tracks.
+   - Important: this only happens **after** everyone's top tracks have been read and candidates are processed **round-robin** (one track per user). That way nobody loses a slot just because someone else happened to be processed earlier, and no single user always gets first pick of shared tracks.
 3. **Update** - the real Spotify playlist gets updated with a delta: only add what's new and remove what fell off. The order of everything else stays untouched.
 
 Adding a new playlist combination (e.g. with a third friend) = a new block in `config.json`, no code changes. See `config.example.json` for an example with two playlists.
@@ -70,11 +70,6 @@ python auth.py --user friend
 
 Each time, you'll get a URL. Open it, log in **as that specific person**, click agree, and paste the URL you land on (even though it looks "broken") back into the terminal. This automatically adds a line like `REFRESH_TOKEN_YOU=...` to `.env`.
 
-> The codes Spotify gives are only valid briefly - if login fails, just re-run the command and paste the URL back a bit faster.
-
-> Already logged in with an older version of this project (before the top-tracks switch)? Re-run `auth.py` for that person - there's an extra scope (`user-top-read`) that an old token won't have.
-
-Updating this on your own laptop and need it on the NAS? Just copy the updated `.env` over (or add the missing line by hand).
 
 ### 4. Create the shared playlist(s)
 
@@ -130,67 +125,6 @@ python sync.py --playlist you_and_friend --playlist friend_group  # two
 Without `--playlist`, all playlists from `config.json` are synced.
 
 Logs land in `logs/sync_<date>.log` (and also just print to the screen).
-
-### 7. Set up Synology Task Scheduler
-
-Playlists can share one daily task or run on separate schedules — use `--playlist` to pick which one(s) a task should sync.
-
-**One task for everything** (daily):
-
-**Control Panel -> Task Scheduler -> Create -> Scheduled Task -> User-defined script**
-
-- **General**: name e.g. "Spotify Sync", a user with read/write access to the project folder.
-- **Schedule**: daily, e.g. 04:00.
-- **Task Settings** -> User-defined script:
-
-```bash
-cd /volume1/path/to/spotify-on-repeat-sync
-./venv/bin/python3 sync.py
-```
-
-**Separate schedules per playlist** (e.g. daily for one, weekly for another):
-
-Create two tasks:
-
-| Task name | Schedule | Script |
-|---|---|---|
-| Spotify - you_and_friend | Daily 04:00 | `./venv/bin/python3 sync.py --playlist you_and_friend` |
-| Spotify - friend_group | Sunday 05:00 | `./venv/bin/python3 sync.py --playlist friend_group` |
-
-Check via SSH (`which python3`, or the path to your venv) which path is correct for your DSM.
-
-You don't need to worry about Spotify API rate limits with this kind of usage (a handful of people, once a day) - that's well under anything that would ever become a problem.
-
-## Adding someone (e.g. a second friend)
-
-1. They run it themselves: `python auth.py --user friend2` -> adds `REFRESH_TOKEN_FRIEND2` to `.env`.
-2. Add them to `users` in `config.json`:
-   ```json
-   { "id": "friend2", "display_name": "Friend2" }
-   ```
-3. Pick one of these two, depending on what you want:
-   - **Add them to the existing playlist**: add `"friend2"` to that playlist's `members`, and raise `max_total` if you want more room.
-   - **Separate, bigger playlist including them** (e.g. 100 with just two of you, 150 once a third joins): add a new block to `playlists` with its own `name` and `members: ["you", "friend", "friend2"]`, create a new empty playlist in Spotify, and put that link in `.env` as `PLAYLIST_ID_<NAME>`. The original playlist keeps existing separately.
-
-No code changes needed in either case.
-
-## Adjusting settings
-
-Everything lives in `config.json`, per playlist:
-- `max_total` - hard ceiling for that playlist.
-- `max_per_user` - how many tracks from one person can be in there at most.
-
-Prefer no limit at all ("infinity and beyond")? Just set `max_total` and `max_per_user` to a high number (e.g. `999999`) - in practice nothing will ever get removed.
-
-## Troubleshooting
-
-- **Duplicates keep getting added to the shared playlist every run** — the delta log shows `+N` tracks even though they're already in the DB. This usually means the script can't read the playlist's current tracks. Since early 2025, Spotify's API uses `"item"` (not `"track"`) as the key in playlist item responses. Make sure `get_playlist_track_ids()` in `spotify_client.py` reads `item.get("item")` rather than `item.get("track")`.
-- **404/403 when reading a playlist** - if this happens on the *shared* playlist itself (not while fetching top tracks), check that `owner_user_id` is correct and that person has `playlist-modify-*` scopes (re-running `auth.py` usually fixes this).
-- **"Missing REFRESH_TOKEN_X in .env"** - that person hasn't (successfully) run `auth.py` yet.
-- **"Missing PLAYLIST_ID_X in .env"** - that playlist is missing its `PLAYLIST_ID_<NAME>` line in `.env` (see step 4 of the setup).
-- **Someone's top tracks look empty or very short** - `/me/top/tracks` needs some listening history to return anything meaningful; with little recent activity the list can be short. This resolves itself with more listening time.
-- Every error is caught and logged per person/playlist - if one account has a problem, the rest of the sync just continues. Check `logs/` for the full story.
-- `debug_list_playlists.py` in this project is a standalone debug script (`python debug_list_playlists.py --user X`) that lists all of an account's playlists with their owner - useful when you're unsure about a playlist ID.
 
 ## Easy to extend
 
