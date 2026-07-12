@@ -213,6 +213,9 @@ def sync_playlist(
             limit = user_cfg.get("top_tracks_limit", 30)
             track_ids = get_top_track_ids(sp, time_range=time_range, limit=limit)
             logger.info("  %s: %d top tracks (%s)", user_id, len(track_ids), time_range)
+        except RuntimeError:
+            logger.warning("  %s: no token in .env, skipping", user_id)
+            continue
         except Exception:
             logger.exception(
                 "  Failed to read top tracks for %s - skipping this user for this run",
