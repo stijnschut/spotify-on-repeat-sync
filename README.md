@@ -114,25 +114,48 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 ### 6. Test it
 
 ```bash
-python sync.py --dry-run
+python sync.py --dry-run                     # preview everything
+python sync.py --dry-run --playlist friend_group  # preview one playlist
 ```
 
 This logs exactly what would happen, without touching the database or the real Spotify playlist. Happy with it? Run it again without `--dry-run`.
+
+Use `--playlist NAME` to sync only a specific playlist. Repeat the flag for multiple playlists:
+
+```bash
+python sync.py --playlist you_and_friend              # just one
+python sync.py --playlist you_and_friend --playlist friend_group  # two
+```
+
+Without `--playlist`, all playlists from `config.json` are synced.
 
 Logs land in `logs/sync_<date>.log` (and also just print to the screen).
 
 ### 7. Set up Synology Task Scheduler
 
+Playlists can share one daily task or run on separate schedules — use `--playlist` to pick which one(s) a task should sync.
+
+**One task for everything** (daily):
+
 **Control Panel -> Task Scheduler -> Create -> Scheduled Task -> User-defined script**
 
 - **General**: name e.g. "Spotify Sync", a user with read/write access to the project folder.
-- **Schedule**: daily, e.g. 04:00 at night - well before anyone's awake, and top tracks don't change in real time anyway.
+- **Schedule**: daily, e.g. 04:00.
 - **Task Settings** -> User-defined script:
 
 ```bash
 cd /volume1/path/to/spotify-on-repeat-sync
 ./venv/bin/python3 sync.py
 ```
+
+**Separate schedules per playlist** (e.g. daily for one, weekly for another):
+
+Create two tasks:
+
+| Task name | Schedule | Script |
+|---|---|---|
+| Spotify - you_and_friend | Daily 04:00 | `./venv/bin/python3 sync.py --playlist you_and_friend` |
+| Spotify - friend_group | Sunday 05:00 | `./venv/bin/python3 sync.py --playlist friend_group` |
 
 Check via SSH (`which python3`, or the path to your venv) which path is correct for your DSM.
 

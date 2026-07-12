@@ -14,8 +14,11 @@ For every playlist defined in config.json:
      everything else is left untouched.
 
 Usage:
-    python sync.py                # normal run
-    python sync.py --dry-run      # log what WOULD happen, change nothing
+    python sync.py                        # normal run
+    python sync.py --dry-run              # log what WOULD happen, change nothing
+    python sync.py --playlist friend_group    # only one playlist
+    python sync.py --playlist a --playlist b  # specific playlists
+    python sync.py --playlist friend_group --dry-run  # dry-run one playlist
 """
 
 from __future__ import annotations
@@ -316,6 +319,13 @@ def main() -> None:
         action="store_true",
         help="Log what would happen without changing anything",
     )
+    parser.add_argument(
+        "--playlist",
+        action="append",
+        dest="playlists",
+        help="Only sync this playlist (can be repeated: --playlist a --playlist b). "
+             "If omitted, all playlists in config are synced.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -345,6 +355,8 @@ def main() -> None:
     today = date.today().isoformat()
 
     for playlist_cfg in config["playlists"]:
+        if args.playlists and playlist_cfg["name"] not in args.playlists:
+            continue
         try:
             sync_playlist(playlist_cfg, users_by_id, db, today, args.dry_run)
         except Exception:
