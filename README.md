@@ -4,6 +4,33 @@ Combines everyone's "songs you love right now" into one (or more) shared playlis
 
 > **Important - why "top tracks" instead of "On Repeat"?** Since Spotify's February 2026 API changes, no app can read the contents of any of Spotify's own algorithmic playlists anymore (On Repeat, Discover Weekly, Release Radar, Daily Mixes) - not even the account owner. That's a deliberate, permanent restriction on Spotify's side, not something we can work around. Instead, this project uses `/me/top/tracks` with `time_range=short_term` (~last 4 weeks) - Spotify's own "top tracks" endpoint, which does still work and is the closest available stand-in for On Repeat.
 
+## Quick start (interactive CLI)
+
+The easiest way to manage everything is the interactive menu:
+
+```bash
+python cli.py
+```
+
+```
+╔══════════════════════════════════════╗
+║  Spotify On Repeat Sync              ║
+║  Shared playlists from top tracks    ║
+╚══════════════════════════════════════╝
+
+  1  Dry-run (preview changes, no modifications)
+  2  Sync now (apply changes to Spotify)
+  3  Add a user (run Spotify OAuth login)
+  4  View playlist status
+  5  Manage users & playlists (edit config)
+
+  0  Exit
+```
+
+From here you can add users, create playlists, preview syncs, and check who has how many tracks — without touching JSON or remembering flags.
+
+> **For the NAS / scheduled sync:** keep using `python sync.py` (or `python sync.py --playlist NAME`) in Task Scheduler. The interactive CLI is for setup and management — the non-interactive script is for automation.
+
 ## How it works
 
 For every playlist in `config.json`:
@@ -20,11 +47,12 @@ For every playlist in `config.json`:
    - Important: this only happens **after** everyone's top tracks have been read and candidates are processed **round-robin** (one track per user). That way nobody loses a slot just because someone else happened to be processed earlier, and no single user always gets first pick of shared tracks.
 3. **Update** - the real Spotify playlist gets updated with a delta: only add what's new and remove what fell off. The order of everything else stays untouched.
 
-Adding a new playlist combination (e.g. with a third friend) = a new block in `config.json`, no code changes. See `config.example.json` for an example with two playlists.
+Adding a new playlist combination (e.g. with a third friend) = a new block in `config.json`, no code changes — or use the interactive menu (`python cli.py` → option 5). See `config.example.json` for an example with two playlists.
 
 ## Requirements
 
 - Python 3.9 or higher
+- `pip install -r requirements.txt` (spotipy, python-dotenv, rich)
 - A free Spotify Developer account (for 1 "app" - see below)
 - Whoever creates the Spotify app (step 1) needs Spotify **Premium** for that - that's been a requirement from Spotify for "Development Mode" apps since February 2026. Everyone else doesn't need Premium, they just log in against that one app.
 
@@ -125,6 +153,17 @@ python sync.py --playlist you_and_friend --playlist friend_group  # two
 Without `--playlist`, all playlists from `config.json` are synced.
 
 Logs land in `logs/sync_<date>.log` (and also just print to the screen).
+
+> **Pro tip:** use the interactive CLI for all of the above — `python cli.py` wraps dry-run, sync, user management, and config editing in one menu. No flags to remember.
+
+## Interactive CLI vs. script
+
+| What | Use |
+|---|---|
+| Setup: add users, create playlists, check status | `python cli.py` (interactive) |
+| Automated sync (daily cron / NAS task) | `python sync.py` (non-interactive) |
+
+Both share the same database and config files — switch freely between them.
 
 ## Easy to extend
 
