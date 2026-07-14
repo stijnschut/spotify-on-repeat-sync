@@ -18,14 +18,15 @@ python cli.py
 ║  Shared playlists from top tracks    ║
 ╚══════════════════════════════════════╝
 
-  1  Dry-run (preview changes, no modifications)
-  2  Sync now (apply changes to Spotify)
-  3  Add a user (run Spotify OAuth login)
-  4  View playlist status
-  5  Manage users & playlists (edit config)
+  1  Sync playlists (preview or apply)
+  2  Add a user (run Spotify OAuth login)
+  3  View playlist status
+  4  Manage users & playlists (edit config)
 
   0  Exit
 ```
+
+Option 1 opens a playlist picker (like ProtonTune's game selector) where you choose which playlists to sync, then decide dry-run or live.
 
 From here you can add users, create playlists, preview syncs, and check who has how many tracks — without touching JSON or remembering flags.
 

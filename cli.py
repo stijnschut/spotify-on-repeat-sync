@@ -97,11 +97,10 @@ def _show_home_menu(version: str = "") -> int:
     console.print()
 
     menu_items = [
-        ("1", "Dry-run (preview changes, no modifications)"),
-        ("2", "Sync now (apply changes to Spotify)"),
-        ("3", "Add a user (run Spotify OAuth login)"),
-        ("4", "View playlist status"),
-        ("5", "Manage users & playlists (edit config)"),
+        ("1", "Sync playlists (preview or apply)"),
+        ("2", "Add a user (run Spotify OAuth login)"),
+        ("3", "View playlist status"),
+        ("4", "Manage users & playlists (edit config)"),
         ("0", "Exit"),
     ]
 
@@ -116,7 +115,7 @@ def _show_home_menu(version: str = "") -> int:
 
     choice = Prompt.ask(
         "[bold]Select an option[/]",
-        choices=[str(i) for i in range(6)],
+        choices=[str(i) for i in range(5)],
         default="0",
     )
     return int(choice)
@@ -124,15 +123,95 @@ def _show_home_menu(version: str = "") -> int:
 
 # ─── Menu Handlers ──────────────────────────────────────────────────────────
 
-def _sync(dry_run: bool, playlist: str | None = None) -> None:
-    """Run the sync script as a subprocess (preserves existing logging/output)."""
+def _select_playlists_and_sync() -> None:
+    """Let the user pick which playlists to sync, then ask dry-run or live."""
+    config = _load_config_safe()
+    if not config:
+        _wait_for_enter()
+        return
+
+    names = [pl["name"] for pl in config["playlists"]]
+    if not names:
+        _print_warning("No playlists in config.json")
+        _wait_for_enter()
+        return
+
+    # ── Playlist picker ──
+    selected: list[str] = []
+    while True:
+        console.clear()
+        _print_header("Select playlists")
+
+        table = Table(box=box.SQUARE)
+        table.add_column("#", style="bold cyan", width=4)
+        table.add_column("Playlist", style="bold")
+        table.add_column("Selected", width=4)
+        for i, name in enumerate(names):
+            mark = "[green]✓[/]" if name in selected else "[dim]·[/]"
+            table.add_row(str(i + 1), name, mark)
+
+        console.print(table)
+        console.print()
+        console.print(
+            "[dim]Select by number (e.g. 3), range (1-3), or comma-separated (1,3).\n"
+            "Type [bold]a[/] for all, [bold]done[/] to continue.[/]"
+        )
+        console.print()
+
+        choice = Prompt.ask("[bold]Your selection[/]", default="done").strip().lower()
+
+        if choice == "done":
+            if not selected:
+                _print_warning("Nothing selected")
+                _wait_for_enter()
+            else:
+                break
+        elif choice == "a":
+            selected = list(names)
+            _print_success(f"All {len(selected)} playlists selected")
+            _wait_for_enter()
+        else:
+            indices: list[int] = []
+            for part in choice.split(","):
+                part = part.strip()
+                if "-" in part:
+                    try:
+                        lo, hi = part.split("-", 1)
+                        indices.extend(range(int(lo) - 1, int(hi)))
+                    except ValueError:
+                        continue
+                else:
+                    try:
+                        indices.append(int(part) - 1)
+                    except ValueError:
+                        continue
+            for idx in indices:
+                if 0 <= idx < len(names) and names[idx] not in selected:
+                    selected.append(names[idx])
+            _print_success(f"{len(selected)} playlist(s) selected")
+            _wait_for_enter()
+
+    # ── Dry-run or live? ──
+    console.clear()
+    _print_header("Sync")
+    console.print(f"[bold]Playlists:[/] {', '.join(selected)}")
+    console.print()
+
+    dry_run = not Confirm.ask(
+        "[bold yellow]Apply changes to the real Spotify playlist(s)?[/]",
+        default=False,
+    )
+    if dry_run:
+        _print_info("Dry-run: no changes will be made")
+    console.print()
+
+    # Build command
     cmd = [sys.executable, str(BASE_DIR / "sync.py")]
     if dry_run:
         cmd.append("--dry-run")
-    if playlist:
-        cmd.extend(["--playlist", playlist])
+    for name in selected:
+        cmd.extend(["--playlist", name])
 
-    _print_header("Dry-run preview" if dry_run else "Syncing with Spotify")
     console.print(f"[dim]Running: {' '.join(cmd)}[/]")
     console.print()
 
@@ -367,19 +446,12 @@ def main() -> None:
                 console.print("\n[bold cyan]Goodbye![/] 🎵\n")
                 break
             elif choice == 1:
-                _sync(dry_run=True)
+                _select_playlists_and_sync()
             elif choice == 2:
-                # Confirm before live sync
-                if Confirm.ask("[bold yellow]Apply changes to real Spotify playlists?[/]", default=False):
-                    _sync(dry_run=False)
-                else:
-                    _print_info("Cancelled — nothing was changed")
-                    _wait_for_enter()
-            elif choice == 3:
                 _add_user()
-            elif choice == 4:
+            elif choice == 3:
                 _view_status()
-            elif choice == 5:
+            elif choice == 4:
                 _manage_config()
         except KeyboardInterrupt:
             console.print("\n\n[bold yellow]Interrupted. Exiting.[/]")
