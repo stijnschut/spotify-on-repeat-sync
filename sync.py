@@ -63,7 +63,44 @@ def setup_logging() -> None:
 
 def load_config(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+
+    # Validate structure so typos / missing fields fail with a clear message.
+    if "users" not in config or not isinstance(config["users"], list):
+        raise ValueError("config.json must contain a 'users' list")
+    if "playlists" not in config or not isinstance(config["playlists"], list):
+        raise ValueError("config.json must contain a 'playlists' list")
+
+    for i, user in enumerate(config["users"]):
+        if "id" not in user:
+            raise ValueError(f"User at index {i} is missing required 'id' field: {json.dumps(user)}")
+
+    for playlist in config["playlists"]:
+        for field in ("name", "owner_user_id", "members", "max_total", "max_per_user"):
+            if field not in playlist:
+                raise ValueError(
+                    f"Playlist is missing required field '{field}': {json.dumps(playlist)}"
+                )
+        if not isinstance(playlist["members"], list):
+            raise ValueError(
+                f"Playlist '{playlist['name']}': 'members' must be a list"
+            )
+        for member in playlist["members"]:
+            if not isinstance(member, str):
+                raise ValueError(
+                    f"Playlist '{playlist['name']}': member {member!r} should be a string (user id)"
+                )
+
+    # Warn about duplicate playlist names (they share the same DB namespace).
+    names = [p["name"] for p in config["playlists"]]
+    dupes = {n for n in names if names.count(n) > 1}
+    if dupes:
+        logger.warning(
+            "Duplicate playlist names detected: %s - they will share the same tracks in the database",
+            ", ".join(sorted(dupes)),
+        )
+
+    return config
 
 
 def get_user_credentials(user_id: str) -> tuple[str, str, str]:
@@ -126,7 +163,19 @@ def add_new_track(
                                              that slot is still "hot",
                                              it'll get another chance
                                              next run.
+    - Already added this run?            -> another user already
+                                             claimed it (shared track),
+                                             just bump last_seen.
     """
+    # Guard: another user may have already added this exact track in
+    # the current run (e.g. both users have the same brand-new track
+    # in their top tracks). Without this, the second db.add_track()
+    # would hit a PRIMARY KEY violation.
+    if db.track_exists(playlist_name, track_id):
+        if not dry_run:
+            db.update_last_seen(playlist_name, track_id, today)
+        return
+
     user_count = db.count_for_user(playlist_name, user_id)
     if user_count >= max_per_user:
         oldest = db.get_oldest(playlist_name, before_date=today, source_user=user_id)
@@ -353,6 +402,16 @@ def main() -> None:
     users_by_id = {u["id"]: u for u in config["users"]}
     db = TrackDatabase(args.db)
     today = date.today().isoformat()
+
+    if args.playlists:
+        known = {p["name"] for p in config["playlists"]}
+        for name in args.playlists:
+            if name not in known:
+                logger.warning(
+                    "--playlist '%s' doesn't match any playlist in config (%s) - skipping",
+                    name,
+                    ", ".join(sorted(known)),
+                )
 
     for playlist_cfg in config["playlists"]:
         if args.playlists and playlist_cfg["name"] not in args.playlists:
