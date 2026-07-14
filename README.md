@@ -48,7 +48,7 @@ For every playlist in `config.json`:
    - Important: this only happens **after** everyone's top tracks have been read and candidates are processed **round-robin** (one track per user). That way nobody loses a slot just because someone else happened to be processed earlier, and no single user always gets first pick of shared tracks.
 3. **Update** - the real Spotify playlist gets updated with a delta: only add what's new and remove what fell off. The order of everything else stays untouched.
 
-Adding a new playlist combination (e.g. with a third friend) = a new block in `config.json`, no code changes — or use the interactive menu (`python cli.py` → option 5). See `config.example.json` for an example with two playlists.
+Adding a new playlist combination (e.g. with a third friend) = a new block in `config.json`, no code changes — or use the interactive menu (`python cli.py` → option 4). See `config.example.json` for an example with two playlists.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ This only needs to happen once, for the whole project - not per person.
 3. Under **Redirect URIs**: add `http://127.0.0.1:8888/callback`.
 4. Enable "Web API" under the requested APIs.
 5. Go to **User Management**, Add all users you want to sync with.
-5. Once created, you'll see **Client ID** and **Client Secret** (secret is behind "View client secret").
+6. Once created, you'll see **Client ID** and **Client Secret** (secret is behind "View client secret").
 
 ### 2. Set up the project
 
@@ -99,6 +99,9 @@ python auth.py --user friend
 
 Each time, you'll get a URL. Open it, log in **as that specific person**, click agree, and paste the URL you land on (even though it looks "broken") back into the terminal. This automatically adds a line like `REFRESH_TOKEN_YOU=...` to `.env`.
 
+> **Alternatively:** use the interactive CLI — `python cli.py` → option 2 — for the same guided flow.
+
+> The codes Spotify gives are only valid briefly - if login fails, just re-run the command and paste the URL back a bit faster.
 
 ### 4. Create the shared playlist(s)
 
@@ -137,25 +140,22 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 
 ### 6. Test it
 
+The quickest way to preview without touching anything:
+
+```bash
+python cli.py          # → 1 (Sync) → pick a playlist → dry-run
+```
+
+Or use the non-interactive script directly:
+
 ```bash
 python sync.py --dry-run                     # preview everything
-python sync.py --dry-run --playlist friend_group  # preview one playlist
+python sync.py --dry-run --playlist you_and_friend  # preview one
 ```
 
-This logs exactly what would happen, without touching the database or the real Spotify playlist. Happy with it? Run it again without `--dry-run`.
-
-Use `--playlist NAME` to sync only a specific playlist. Repeat the flag for multiple playlists:
-
-```bash
-python sync.py --playlist you_and_friend              # just one
-python sync.py --playlist you_and_friend --playlist friend_group  # two
-```
-
-Without `--playlist`, all playlists from `config.json` are synced.
+If the dry-run looks good, run it for real (via `cli.py` or `sync.py` without `--dry-run`).
 
 Logs land in `logs/sync_<date>.log` (and also just print to the screen).
-
-> **Pro tip:** use the interactive CLI for all of the above — `python cli.py` wraps dry-run, sync, user management, and config editing in one menu. No flags to remember.
 
 ## Interactive CLI vs. script
 
@@ -172,4 +172,5 @@ What keeps this deliberately simple, so it's easy to grow:
 - Adding a new source = a new user + optionally a new playlist block in `config.json`. `sync.py` itself never needs to change for more people or more playlist combinations.
 - `spotify_client.py`, `database.py`, and `sync.py` are decoupled - if you ever want a different data source (e.g. a different `time_range`, or something else entirely), you only need to change `get_top_track_ids()` in `spotify_client.py`.
 - The number of pages fetched is controlled by `TOP_TRACKS_PAGES` in `spotify_client.py` (default: 2). Tune this if members have very broad or very narrow listening habits.
-- Possible next steps: auto-creating playlists instead of doing it by hand, or a small overview (standalone script or webpage) showing what's currently in each database.
+- Possible next steps: API-driven playlist creation instead of creating them by hand in Spotify, or a web-based overview of what's currently in each database.
+- `cli.py` is the user-facing layer (built with `rich`) — add menus without touching the core sync logic.
