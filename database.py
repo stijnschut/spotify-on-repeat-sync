@@ -26,8 +26,11 @@ class TrackDatabase:
 
     @contextmanager
     def _connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        # WAL mode lets readers and writers coexist — critical on a NAS
+        # where a daily cron job and a manual run might overlap.
+        conn.execute("PRAGMA journal_mode=WAL")
         try:
             yield conn
             conn.commit()
@@ -127,3 +130,31 @@ class TrackDatabase:
                 (playlist_name,),
             ).fetchall()
             return [r["track_id"] for r in rows]
+
+    def refresh_tracks(
+        self, playlist_name: str, track_ids: list[str], today: str
+    ) -> list[str]:
+        """
+        For each track_id: if the track already exists in this
+        playlist, bump its last_seen to today. Return the ids that
+        are NOT yet tracked (i.e. candidates for pass 2).
+
+        Done in a single connection + transaction so it's fast even
+        with hundreds of tracks from multiple users.
+        """
+        with self._connect() as conn:
+            # First, bulk-update all existing tracks
+            conn.executemany(
+                "UPDATE tracks SET last_seen = ? WHERE playlist_name = ? AND track_id = ?",
+                [(today, playlist_name, tid) for tid in track_ids],
+            )
+            # Then find which ones actually matched (existed)
+            placeholders = ",".join("?" for _ in track_ids)
+            existing = set(
+                row[0]
+                for row in conn.execute(
+                    f"SELECT track_id FROM tracks WHERE playlist_name = ? AND track_id IN ({placeholders})",
+                    [playlist_name] + track_ids,
+                ).fetchall()
+            )
+        return [tid for tid in track_ids if tid not in existing]

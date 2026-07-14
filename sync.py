@@ -275,12 +275,13 @@ def sync_playlist(
             )
             continue
 
-        for track_id in track_ids:
-            if db.track_exists(name, track_id):
-                if not dry_run:
-                    db.update_last_seen(name, track_id, today)
-            else:
-                candidates.append((track_id, user_id))
+        # Use batched refresh: one connection bumps all existing tracks
+        # and returns the ones that are new (candidates).
+        new_ids = db.refresh_tracks(name, track_ids, today) if not dry_run else [
+            tid for tid in track_ids if not db.track_exists(name, tid)
+        ]
+        for tid in new_ids:
+            candidates.append((tid, user_id))
 
     # Pass 2: now try to fit each new track in, evicting the stalest
     # qualifying track only if needed - see add_new_track().
