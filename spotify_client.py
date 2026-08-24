@@ -65,10 +65,11 @@ def _track_display_name(track: dict) -> str:
 
 def get_top_tracks(
     sp: spotipy.Spotify, time_range: str = "short_term", limit: int = 30
-) -> list[tuple[str, str]]:
+) -> list[dict]:
     """
-    The current user's top tracks over `time_range`, returned as
-    (track_id, "Artist - Title") pairs.
+    The current user's top tracks over `time_range`, returned as a list
+    of dicts with keys: id, display ("Artist - Title"), duration_ms,
+    and artists (list of artist names).
 
     ("short_term" ~4 weeks, "medium_term" ~6 months, "long_term" ~years).
     "short_term" is the closest match to what On Repeat used to represent.
@@ -79,7 +80,7 @@ def get_top_tracks(
     """
     per_page = min(limit, MAX_TOP_TRACKS_LIMIT)
     seen: set[str] = set()
-    results: list[tuple[str, str]] = []
+    results: list[dict] = []
     for page in range(TOP_TRACKS_PAGES):
         offset = page * per_page
         batch = sp.current_user_top_tracks(
@@ -89,7 +90,14 @@ def get_top_tracks(
             tid = item.get("id") if item else None
             if tid and tid not in seen:
                 seen.add(tid)
-                results.append((tid, _track_display_name(item)))
+                results.append(
+                    {
+                        "id": tid,
+                        "display": _track_display_name(item),
+                        "duration_ms": item.get("duration_ms"),
+                        "artists": [a.get("name", "") for a in item.get("artists", [])],
+                    }
+                )
         # Stop early if Spotify returned fewer tracks than requested (last page)
         if len(batch.get("items", [])) < per_page:
             break

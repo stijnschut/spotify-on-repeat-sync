@@ -23,6 +23,7 @@ python cli.py
   3  View playlist status
   4  Manage users & playlists (edit config)
   5  Manage Discord webhooks
+  6  Settings (artist blacklist, max duration)
 
   0  Exit
 ```
@@ -131,13 +132,16 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
       "max_total": 100,
       "max_per_user": 50
     }
-  ]
+  ],
+  "artist_blacklist": [],
+  "max_duration_minutes": null
 }
 ```
 
 - `owner_user_id` must be someone who's logged in via `auth.py` - their account is used to actually edit the playlist (adding/removing tracks).
 - `max_per_user` is a fairness cap (no one person can fill the whole playlist), `max_total` is the real ceiling. `max_per_user × number of members` can be higher than `max_total` just fine - `max_total` simply applies as the hard limit.
 - Optional, per person under `users`: `"top_tracks_time_range"` (`short_term`/`medium_term`/`long_term`, default `short_term`) and `"top_tracks_limit"` (default 30, max 50; **recommended**: 50 for a 2-person playlist of 100) if you want to tune someone's window. Regardless of this limit, the script always fetches **2 pages** (via `offset`) so the effective pool is up to `2 × limit` tracks per user - enough to fill a 100-track playlist even with significant overlap.
+- Optional, top-level: `"artist_blacklist"` (list of artist names to skip) and `"max_duration_minutes"` (drop tracks longer than this; `null` = no limit). Both can also be managed from the CLI → option 6 (Settings).
 
 ### 6. Test it
 

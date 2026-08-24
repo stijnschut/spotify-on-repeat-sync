@@ -19,5 +19,7 @@
       "max_total": 150,
       "max_per_user": 50
     }
-  ]
+  ],
+  "artist_blacklist": [],
+  "max_duration_minutes": null
 }

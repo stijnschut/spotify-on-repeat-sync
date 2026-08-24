@@ -101,6 +101,18 @@ def load_config(path: Path) -> dict:
             ", ".join(sorted(dupes)),
         )
 
+    # Optional global filters.
+    blacklist = config.get("artist_blacklist")
+    if blacklist is not None and not isinstance(blacklist, list):
+        raise ValueError("'artist_blacklist' must be a list of artist names")
+    for a in blacklist or []:
+        if not isinstance(a, str):
+            raise ValueError(f"'artist_blacklist' entries must be strings, got {a!r}")
+
+    max_dur = config.get("max_duration_minutes")
+    if max_dur is not None and not isinstance(max_dur, int):
+        raise ValueError("'max_duration_minutes' must be an integer or null")
+
     return config
 
 
@@ -243,8 +255,29 @@ def add_new_track(
         db.add_track(playlist_name, track_id, user_id, today)
 
 
+def _should_skip_track(
+    track: dict, artist_blacklist: list[str] | None, max_duration_minutes: int | None
+) -> bool:
+    """Return True if a track should be ignored (blacklisted artist or too long)."""
+    if max_duration_minutes:
+        duration_ms = track.get("duration_ms")
+        if duration_ms and duration_ms > max_duration_minutes * 60_000:
+            return True
+    if artist_blacklist:
+        blocked = {a.strip().lower() for a in artist_blacklist if a.strip()}
+        if any((a or "").strip().lower() in blocked for a in track.get("artists", [])):
+            return True
+    return False
+
+
 def sync_playlist(
-    playlist_cfg: dict, users_by_id: dict, db: TrackDatabase, today: str, dry_run: bool
+    playlist_cfg: dict,
+    users_by_id: dict,
+    db: TrackDatabase,
+    today: str,
+    dry_run: bool,
+    artist_blacklist: list[str] | None = None,
+    max_duration_minutes: int | None = None,
 ) -> None:
     name = playlist_cfg["name"]
     max_total = playlist_cfg["max_total"]
@@ -290,9 +323,18 @@ def sync_playlist(
             )
             continue
 
-        track_ids = [tid for tid, _ in tracks]
-        for tid, display in tracks:
-            names_by_id[tid] = display
+        # Capture display names for everything (even skipped tracks, so
+        # Discord patch notes still show proper names), then filter out
+        # tracks the user doesn't want.
+        for t in tracks:
+            names_by_id[t["id"]] = t["display"]
+
+        kept = [t for t in tracks if not _should_skip_track(t, artist_blacklist, max_duration_minutes)]
+        skipped = len(tracks) - len(kept)
+        if skipped:
+            logger.info("  %s: filtered out %d track(s) (blacklist/duration)", user_id, skipped)
+
+        track_ids = [t["id"] for t in kept]
 
         # Use batched refresh: one connection bumps all existing tracks
         # and returns the ones that are new (candidates).
@@ -471,6 +513,10 @@ def main() -> None:
 
     config = load_config(config_path)
     users_by_id = {u["id"]: u for u in config["users"]}
+    # Global filters: skip blacklisted artists and (optionally) tracks
+    # longer than a max duration. Both are optional and default to off.
+    artist_blacklist = config.get("artist_blacklist") or []
+    max_duration_minutes = config.get("max_duration_minutes")
     db = TrackDatabase(args.db)
     today = date.today().isoformat()
 
@@ -488,7 +534,15 @@ def main() -> None:
         if args.playlists and playlist_cfg["name"] not in args.playlists:
             continue
         try:
-            sync_playlist(playlist_cfg, users_by_id, db, today, args.dry_run)
+            sync_playlist(
+                playlist_cfg,
+                users_by_id,
+                db,
+                today,
+                args.dry_run,
+                artist_blacklist,
+                max_duration_minutes,
+            )
         except Exception:
             logger.exception(
                 "Playlist '%s' failed - continuing with the next one",

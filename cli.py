@@ -102,6 +102,7 @@ def _show_home_menu(version: str = "") -> int:
         ("3", "View playlist status"),
         ("4", "Manage users & playlists (edit config)"),
         ("5", "Manage Discord webhooks"),
+        ("6", "Settings (artist blacklist, max duration)"),
         ("0", "Exit"),
     ]
 
@@ -116,7 +117,7 @@ def _show_home_menu(version: str = "") -> int:
 
     choice = Prompt.ask(
         "[bold]Select an option[/]",
-        choices=[str(i) for i in range(6)],
+        choices=[str(i) for i in range(7)],
         default="0",
     )
     return int(choice)
@@ -552,6 +553,95 @@ def _manage_webhooks() -> None:
             _wait_for_enter()
 
 
+def _settings_menu() -> None:
+    """Submenu for global sync filters: artist blacklist + max duration."""
+    while True:
+        config = _load_config_safe()
+        if not config:
+            _wait_for_enter()
+            return
+
+        _print_header("Settings")
+
+        blacklist = config.get("artist_blacklist") or []
+        max_dur = config.get("max_duration_minutes")
+
+        table = Table(box=box.SIMPLE, title="[bold cyan]Sync filters[/]")
+        table.add_column("Setting", style="bold")
+        table.add_column("Value")
+        table.add_row(
+            "Artist blacklist",
+            ", ".join(blacklist) if blacklist else "[dim](none)[/]",
+        )
+        table.add_row(
+            "Max song duration",
+            f"{max_dur} min" if max_dur else "[dim]no limit[/]",
+        )
+        console.print(table)
+        console.print()
+        console.print("[cyan]A[/] Add artist to blacklist   [cyan]R[/] Remove artist")
+        console.print("[cyan]D[/] Set max duration   [cyan]0[/] Back")
+        console.print()
+
+        choice = Prompt.ask("[bold]Select[/]", choices=["A", "R", "D", "0"], default="0").upper()
+
+        if choice == "0":
+            return
+
+        if choice == "A":
+            artist = Prompt.ask("[bold]Artist name[/]").strip()
+            if not artist:
+                _print_warning("No name entered, skipping")
+                _wait_for_enter()
+                continue
+            if artist.lower() in [a.lower() for a in blacklist]:
+                _print_warning(f"'{artist}' is already blacklisted")
+                _wait_for_enter()
+                continue
+            config.setdefault("artist_blacklist", []).append(artist)
+            if _save_config(config):
+                _print_success(f"Blacklisted '{artist}'")
+            _wait_for_enter()
+
+        elif choice == "R":
+            if not blacklist:
+                _print_warning("No artists blacklisted")
+                _wait_for_enter()
+                continue
+            console.print()
+            for i, a in enumerate(blacklist):
+                console.print(f"  [cyan]{i + 1}[/] {a}")
+            console.print()
+            try:
+                idx = IntPrompt.ask(
+                    "[bold]Number to remove[/]",
+                    choices=[str(i + 1) for i in range(len(blacklist))],
+                ) - 1
+            except (ValueError, IndexError):
+                continue
+            removed = blacklist.pop(idx)
+            if _save_config(config):
+                _print_success(f"Removed '{removed}' from blacklist")
+            _wait_for_enter()
+
+        elif choice == "D":
+            val = Prompt.ask(
+                "[bold]Max duration in minutes[/] (0 or blank = no limit)",
+                default=str(max_dur or ""),
+            ).strip()
+            if not val or val == "0":
+                config["max_duration_minutes"] = None
+                _print_success("Max duration disabled (no limit)")
+            else:
+                try:
+                    config["max_duration_minutes"] = int(val)
+                    _print_success(f"Max duration set to {int(val)} minutes")
+                except ValueError:
+                    _print_error("Invalid number")
+            _save_config(config)
+            _wait_for_enter()
+
+
 # ─── Main Loop ──────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -578,6 +668,8 @@ def main() -> None:
                 _manage_config()
             elif choice == 5:
                 _manage_webhooks()
+            elif choice == 6:
+                _settings_menu()
         except KeyboardInterrupt:
             console.print("\n\n[bold yellow]Interrupted. Exiting.[/]")
             break
