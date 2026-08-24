@@ -174,8 +174,8 @@ reporting which songs were added and removed:
 
 ```
 🟢 Songs added (+2)
-Kendrick Lamar - HUMBLE. (by Stijn)
-Tame Impala - The Less I Know The Better (by Funkert)
+Kendrick Lamar - HUMBLE. (by user1)
+Tame Impala - The Less I Know The Better (by user2)
 
 🔴 Songs removed (-1)
 Drake - God's Plan
