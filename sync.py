@@ -402,20 +402,21 @@ def _send_webhook_if_needed(
     # Resolve display names from the map we already built this run
     # (top tracks + current playlist), so we never need a separate
     # metadata call. Added tracks also get their source_user looked up
-    # from the DB, mapped to a friendly display name from the config.
+    # from the DB, mapped to a friendly display name from the config,
+    # then grouped per user for the Discord embed.
     sources = db.get_track_sources(playlist_name, to_add)
 
-    added_lines: list[str] = []
+    added_grouped: dict[str, list[str]] = {}
     for tid in to_add:
         title = names_by_id.get(tid, tid)
         uid = sources.get(tid, "?")
         display = users_by_id.get(uid, {}).get("display_name", uid)
-        added_lines.append(f"{title} (by {display})")
+        added_grouped.setdefault(display, []).append(title)
 
     removed_lines = [names_by_id.get(tid, tid) for tid in to_remove]
 
     try:
-        send_patch_notes(webhook_url, playlist_name, added_lines, removed_lines)
+        send_patch_notes(webhook_url, playlist_name, added_grouped, removed_lines)
         logger.info("  Sent Discord patch notes for '%s'", playlist_name)
     except Exception:
         logger.exception("  Failed to send Discord webhook for '%s'", playlist_name)

@@ -12,64 +12,80 @@ import requests
 # Spotify green.
 EMBED_COLOR = 0x1DB954
 
-# Discord caps embed field values at 1024 chars; keep messages readable.
+# How many songs to list per user (added) and in the removed section before
+# summarising with "... and N more". This keeps big first-sync / DB-wipe
+# deltas readable instead of dumping the entire playlist.
+MAX_PER_USER = 10
+MAX_REMOVED = 20
+
+# Discord caps embed field values at 1024 chars; leave a little headroom.
 MAX_FIELD_CHARS = 1000
-MAX_ITEMS = 25
 
 
-def _format_list(items: list[str]) -> str:
-    """Join items into one field value, truncating with '... and N more'."""
+def _format_songs(songs: list[str], max_items: int) -> str:
+    """Join up to `max_items` songs, appending an italic '... and N more'."""
     lines: list[str] = []
     char_count = 0
-    for item in items:
-        if len(lines) >= MAX_ITEMS:
+    for song in songs[:max_items]:
+        if char_count + len(song) + 1 > MAX_FIELD_CHARS:
             break
-        if char_count + len(item) + 1 > MAX_FIELD_CHARS:
-            break
-        lines.append(item)
-        char_count += len(item) + 1
+        lines.append(song)
+        char_count += len(song) + 1
 
-    shown = "\n".join(lines)
-    hidden = len(items) - len(lines)
+    text = "\n".join(lines)
+    hidden = len(songs) - len(lines)
     if hidden > 0:
-        shown += f"\n… and {hidden} more"
-    return shown
+        text += f"\n*… and {hidden} more*"
+    return text
 
 
 def send_patch_notes(
     webhook_url: str,
     playlist_name: str,
-    added: list[str],
+    added: dict[str, list[str]],
     removed: list[str],
     test: bool = False,
 ) -> None:
     """Send sync patch notes for one playlist.
 
-    `added` and `removed` are pre-formatted display strings, e.g.
-    added:   "Kendrick Lamar - HUMBLE. (by Stijn)"
-    removed: "Drake - God's Plan"
-    Set `test=True` to clearly mark the message as a test.
+    `added` maps a user's display name to their newly-added songs, e.g.
+    {"You": ["Kendrick Lamar - HUMBLE.", ...]}. `removed` is a flat list
+    of "Artist - Title" strings. Set `test=True` to mark the message
+    as a test.
     """
     fields: list[dict] = []
-    if added:
+
+    # One field per user so the embed scales to any group size without
+    # running into Discord's 1024-char-per-field limit.
+    for user, songs in added.items():
         fields.append(
             {
-                "name": f"🟢 Songs added (+{len(added)})",
-                "value": _format_list(added),
-                "inline": False,
-            }
-        )
-    if removed:
-        fields.append(
-            {
-                "name": f"🔴 Songs removed (-{len(removed)})",
-                "value": _format_list(removed),
+                "name": f"🟢 {user}",
+                "value": _format_songs(songs, MAX_PER_USER),
                 "inline": False,
             }
         )
 
+    if removed:
+        fields.append(
+            {
+                "name": "🔴 Removed",
+                "value": _format_songs(removed, MAX_REMOVED),
+                "inline": False,
+            }
+        )
+
+    total_added = sum(len(songs) for songs in added.values())
+    total_removed = len(removed)
+
+    summary: list[str] = []
+    if total_added:
+        summary.append(f"+{total_added} added")
+    if total_removed:
+        summary.append(f"-{total_removed} removed")
+
     title = f"Playlist: {playlist_name}"
-    description = "Sync update"
+    description = "Sync update · " + " · ".join(summary)
     if test:
         title = f"🧪 TEST — {title}"
         description = "Test message (no real changes were made)"
@@ -94,13 +110,18 @@ def send_test(webhook_url: str, playlist_name: str) -> None:
     send_patch_notes(
         webhook_url,
         playlist_name,
-        added=[
-            "Kendrick Lamar - HUMBLE. (by You)",
-            "Tame Impala - The Less I Know The Better (by Friend)",
-        ],
+        added={
+            "You": [
+                "Kendrick Lamar - HUMBLE.",
+                "Tame Impala - The Less I Know The Better",
+            ],
+            "Friend": [
+                "Drake - God's Plan",
+            ],
+        },
         removed=[
-            "Drake - God's Plan",
             "Post Malone - Circles",
+            "The Weeknd - Blinding Lights",
         ],
         test=True,
     )

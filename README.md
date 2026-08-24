@@ -173,13 +173,22 @@ Each playlist can optionally send a Discord webhook after every sync,
 reporting which songs were added and removed:
 
 ```
-🟢 Songs added (+2)
-Kendrick Lamar - HUMBLE. (by user1)
-Tame Impala - The Less I Know The Better (by user2)
+Sync update · +3 added · -1 removed
 
-🔴 Songs removed (-1)
+🟢 You
+Kendrick Lamar - HUMBLE.
+Tame Impala - The Less I Know The Better
+
+🟢 Friend
 Drake - God's Plan
+
+🔴 Removed
+Post Malone - Circles
 ```
+
+Songs are grouped by who added them. To keep big first-sync / DB-wipe
+deltas readable, at most **10 songs per user** (and **20 removed**) are
+listed — anything beyond that is summarised as "_… and N more_".
 
 **Setup** — either:
 
