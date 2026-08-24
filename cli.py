@@ -503,9 +503,18 @@ def _manage_webhooks() -> None:
                 _print_warning("No URL entered, skipping")
                 _wait_for_enter()
                 continue
-            if not env_path.exists():
-                env_path.touch()
-            set_key(str(env_path), key, url)
+            try:
+                if not env_path.exists():
+                    env_path.touch()
+                set_key(str(env_path), key, url)
+            except OSError as e:
+                _print_error(
+                    f"Could not write .env ({e}).\n"
+                    "The .env file is read-only on this machine — fix with:\n"
+                    f"  chmod u+w {env_path}"
+                )
+                _wait_for_enter()
+                continue
             load_dotenv(env_path, override=True)
             _print_success(f"Webhook set for '{name}'")
             _wait_for_enter()
@@ -514,7 +523,16 @@ def _manage_webhooks() -> None:
             if not os.environ.get(key):
                 _print_warning(f"No webhook set for '{name}'")
             else:
-                unset_key(str(env_path), key)
+                try:
+                    unset_key(str(env_path), key)
+                except OSError as e:
+                    _print_error(
+                        f"Could not write .env ({e}).\n"
+                        "The .env file is read-only on this machine — fix with:\n"
+                        f"  chmod u+w {env_path}"
+                    )
+                    _wait_for_enter()
+                    continue
                 load_dotenv(env_path, override=True)
                 _print_success(f"Webhook removed for '{name}'")
             _wait_for_enter()
