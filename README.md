@@ -199,7 +199,7 @@ Notes:
 
 What keeps this deliberately simple, so it's easy to grow:
 - Adding a new source = a new user + optionally a new playlist block in `config.json`. `sync.py` itself never needs to change for more people or more playlist combinations.
-- `spotify_client.py`, `database.py`, and `sync.py` are decoupled - if you ever want a different data source (e.g. a different `time_range`, or something else entirely), you only need to change `get_top_track_ids()` in `spotify_client.py`.
+- `spotify_client.py`, `database.py`, and `sync.py` are decoupled - if you ever want a different data source (e.g. a different `time_range`, or something else entirely), you only need to change `get_top_tracks()` in `spotify_client.py`.
 - The number of pages fetched is controlled by `TOP_TRACKS_PAGES` in `spotify_client.py` (default: 2). Tune this if members have very broad or very narrow listening habits.
 - Possible next steps: API-driven playlist creation instead of creating them by hand in Spotify, or a web-based overview of what's currently in each database.
 - `cli.py` is the user-facing layer (built with `rich`) — add menus without touching the core sync logic.

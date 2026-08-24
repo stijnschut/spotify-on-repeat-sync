@@ -54,11 +54,22 @@ def get_client_for_user(
     return spotipy.Spotify(auth=access_token)
 
 
-def get_top_track_ids(
+def _track_display_name(track: dict) -> str:
+    """Build a 'Artist1, Artist2 - Title' string from a Spotify track object."""
+    artists = ", ".join(a.get("name", "") for a in track.get("artists", []))
+    title = track.get("name") or "Unknown"
+    if artists:
+        return f"{artists} - {title}"
+    return title
+
+
+def get_top_tracks(
     sp: spotipy.Spotify, time_range: str = "short_term", limit: int = 30
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """
-    The current user's top tracks over `time_range`
+    The current user's top tracks over `time_range`, returned as
+    (track_id, "Artist - Title") pairs.
+
     ("short_term" ~4 weeks, "medium_term" ~6 months, "long_term" ~years).
     "short_term" is the closest match to what On Repeat used to represent.
 
@@ -68,7 +79,7 @@ def get_top_track_ids(
     """
     per_page = min(limit, MAX_TOP_TRACKS_LIMIT)
     seen: set[str] = set()
-    results: list[str] = []
+    results: list[tuple[str, str]] = []
     for page in range(TOP_TRACKS_PAGES):
         offset = page * per_page
         batch = sp.current_user_top_tracks(
@@ -78,50 +89,35 @@ def get_top_track_ids(
             tid = item.get("id") if item else None
             if tid and tid not in seen:
                 seen.add(tid)
-                results.append(tid)
+                results.append((tid, _track_display_name(item)))
         # Stop early if Spotify returned fewer tracks than requested (last page)
         if len(batch.get("items", [])) < per_page:
             break
     return results
 
 
-def get_track_names(
-    sp: spotipy.Spotify, track_ids: list[str]
-) -> dict[str, str]:
+def get_playlist_tracks(
+    sp: spotipy.Spotify, playlist_id: str
+) -> list[tuple[str, str]]:
     """
-    Look up display names for a list of track IDs, returning
-    {track_id: "Artist - Title"}. Batched by 50 (Spotify's limit per
-    request). Missing/unavailable tracks are simply left out.
+    (track_id, "Artist - Title") for every track in a playlist, in
+    playlist order. Skips local files / unavailable tracks.
     """
-    names: dict[str, str] = {}
-    for i in range(0, len(track_ids), 50):
-        batch = track_ids[i : i + 50]
-        result = sp.tracks(batch)
-        for track in result.get("tracks", []):
-            if not track or not track.get("id"):
-                continue
-            artists = ", ".join(a.get("name", "") for a in track.get("artists", []))
-            names[track["id"]] = f"{artists} - {track['name']}"
-    return names
-
-
-def get_playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> list[str]:
-    """Track IDs in a playlist, in playlist order. Skips local files / unavailable tracks."""
-    track_ids: list[str] = []
+    results_out: list[tuple[str, str]] = []
     results = sp.playlist_items(
         playlist_id,
-        fields="items(item(id)),next",
+        fields="items(item(id,name,artists(name))),next",
         additional_types=["track"],
     )
     while True:
         for item in results["items"]:
             track = item.get("item")
             if track and track.get("id"):
-                track_ids.append(track["id"])
+                results_out.append((track["id"], _track_display_name(track)))
         if not results.get("next"):
             break
         results = sp.next(results)
-    return track_ids
+    return results_out
 
 
 def add_tracks(sp: spotipy.Spotify, playlist_id: str, track_ids: list[str]) -> None:

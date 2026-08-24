@@ -38,9 +38,8 @@ from notify import send_patch_notes
 from spotify_client import (
     add_tracks,
     get_client_for_user,
-    get_playlist_track_ids,
-    get_top_track_ids,
-    get_track_names,
+    get_playlist_tracks,
+    get_top_tracks,
     remove_tracks,
 )
 
@@ -260,6 +259,10 @@ def sync_playlist(
     # member processed later could unfairly lose a track that's still
     # genuinely in their top tracks, just not re-confirmed yet.
     candidates: list[tuple[str, str]] = []
+    # track_id -> "Artist - Title" for anything we see this run, used
+    # later for the Discord patch notes (avoids a separate metadata API
+    # call, which Spotify's 2026 API restricts).
+    names_by_id: dict[str, str] = {}
 
     for user_id in playlist_cfg["members"]:
         user_cfg = users_by_id.get(user_id)
@@ -275,8 +278,8 @@ def sync_playlist(
             sp = get_client_for_user(client_id, client_secret, refresh_token)
             time_range = user_cfg.get("top_tracks_time_range", "short_term")
             limit = user_cfg.get("top_tracks_limit", 30)
-            track_ids = get_top_track_ids(sp, time_range=time_range, limit=limit)
-            logger.info("  %s: %d top tracks (%s)", user_id, len(track_ids), time_range)
+            tracks = get_top_tracks(sp, time_range=time_range, limit=limit)
+            logger.info("  %s: %d top tracks (%s)", user_id, len(tracks), time_range)
         except RuntimeError:
             logger.warning("  %s: no token in .env, skipping", user_id)
             continue
@@ -286,6 +289,10 @@ def sync_playlist(
                 user_id,
             )
             continue
+
+        track_ids = [tid for tid, _ in tracks]
+        for tid, display in tracks:
+            names_by_id[tid] = display
 
         # Use batched refresh: one connection bumps all existing tracks
         # and returns the ones that are new (candidates).
@@ -335,13 +342,17 @@ def sync_playlist(
 
     desired = db.get_all_track_ids(name)
     try:
-        current = get_playlist_track_ids(sp_owner, spotify_playlist_id)
+        current_tracks = get_playlist_tracks(sp_owner, spotify_playlist_id)
     except Exception:
         logger.exception(
             "  Couldn't read the current tracks of playlist '%s' on Spotify - skipping push",
             name,
         )
         return
+
+    current = [tid for tid, _ in current_tracks]
+    for tid, display in current_tracks:
+        names_by_id.setdefault(tid, display)
 
     to_add = [t for t in desired if t not in current]
     to_remove = [t for t in current if t not in desired]
@@ -365,14 +376,14 @@ def sync_playlist(
 
     # Send Discord patch notes if this playlist has a webhook configured.
     _send_webhook_if_needed(
-        sp_owner, db, users_by_id, name, to_add, to_remove
+        db, users_by_id, names_by_id, name, to_add, to_remove
     )
 
 
 def _send_webhook_if_needed(
-    sp_owner: object,
     db: TrackDatabase,
     users_by_id: dict,
+    names_by_id: dict[str, str],
     playlist_name: str,
     to_add: list[str],
     to_remove: list[str],
@@ -388,20 +399,20 @@ def _send_webhook_if_needed(
     if not to_add and not to_remove:
         return
 
-    # DB only stores IDs, so resolve names via Spotify for both added
-    # and removed tracks. Added tracks also get their source_user looked
-    # up from the DB, mapped to a friendly display name from the config.
-    names = get_track_names(sp_owner, list(set(to_add + to_remove)))
+    # Resolve display names from the map we already built this run
+    # (top tracks + current playlist), so we never need a separate
+    # metadata call. Added tracks also get their source_user looked up
+    # from the DB, mapped to a friendly display name from the config.
     sources = db.get_track_sources(playlist_name, to_add)
 
     added_lines: list[str] = []
     for tid in to_add:
-        title = names.get(tid, tid)
+        title = names_by_id.get(tid, tid)
         uid = sources.get(tid, "?")
         display = users_by_id.get(uid, {}).get("display_name", uid)
         added_lines.append(f"{title} (by {display})")
 
-    removed_lines = [names.get(tid, tid) for tid in to_remove]
+    removed_lines = [names_by_id.get(tid, tid) for tid in to_remove]
 
     try:
         send_patch_notes(webhook_url, playlist_name, added_lines, removed_lines)

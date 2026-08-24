@@ -41,12 +41,14 @@ def send_patch_notes(
     playlist_name: str,
     added: list[str],
     removed: list[str],
+    test: bool = False,
 ) -> None:
     """Send sync patch notes for one playlist.
 
     `added` and `removed` are pre-formatted display strings, e.g.
     added:   "Kendrick Lamar - HUMBLE. (by Stijn)"
     removed: "Drake - God's Plan"
+    Set `test=True` to clearly mark the message as a test.
     """
     fields: list[dict] = []
     if added:
@@ -66,11 +68,17 @@ def send_patch_notes(
             }
         )
 
+    title = f"Playlist: {playlist_name}"
+    description = "Sync update"
+    if test:
+        title = f"🧪 TEST — {title}"
+        description = "Test message (no real changes were made)"
+
     payload = {
         "embeds": [
             {
-                "title": f"Playlist: {playlist_name}",
-                "description": "Sync update",
+                "title": title,
+                "description": description,
                 "color": EMBED_COLOR,
                 "fields": fields,
             }
@@ -94,4 +102,5 @@ def send_test(webhook_url: str, playlist_name: str) -> None:
             "Drake - God's Plan",
             "Post Malone - Circles",
         ],
+        test=True,
     )
