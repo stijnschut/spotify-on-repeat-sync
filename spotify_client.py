@@ -85,6 +85,26 @@ def get_top_track_ids(
     return results
 
 
+def get_track_names(
+    sp: spotipy.Spotify, track_ids: list[str]
+) -> dict[str, str]:
+    """
+    Look up display names for a list of track IDs, returning
+    {track_id: "Artist - Title"}. Batched by 50 (Spotify's limit per
+    request). Missing/unavailable tracks are simply left out.
+    """
+    names: dict[str, str] = {}
+    for i in range(0, len(track_ids), 50):
+        batch = track_ids[i : i + 50]
+        result = sp.tracks(batch)
+        for track in result.get("tracks", []):
+            if not track or not track.get("id"):
+                continue
+            artists = ", ".join(a.get("name", "") for a in track.get("artists", []))
+            names[track["id"]] = f"{artists} - {track['name']}"
+    return names
+
+
 def get_playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> list[str]:
     """Track IDs in a playlist, in playlist order. Skips local files / unavailable tracks."""
     track_ids: list[str] = []

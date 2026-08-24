@@ -6,18 +6,18 @@ import json
 import os
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 
+from dotenv import load_dotenv, set_key, unset_key
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
-from rich.text import Text
 
 from database import TrackDatabase
-from sync import load_config, setup_logging
+from notify import send_test
+from sync import discord_webhook_env_key, load_config
 
 BASE_DIR = Path(__file__).resolve().parent
 console = Console()
@@ -101,6 +101,7 @@ def _show_home_menu(version: str = "") -> int:
         ("2", "Add a user (run Spotify OAuth login)"),
         ("3", "View playlist status"),
         ("4", "Manage users & playlists (edit config)"),
+        ("5", "Manage Discord webhooks"),
         ("0", "Exit"),
     ]
 
@@ -115,7 +116,7 @@ def _show_home_menu(version: str = "") -> int:
 
     choice = Prompt.ask(
         "[bold]Select an option[/]",
-        choices=[str(i) for i in range(5)],
+        choices=[str(i) for i in range(6)],
         default="0",
     )
     return int(choice)
@@ -431,6 +432,108 @@ def _delete_playlist_from_config(config: dict) -> None:
         _print_success(f"Removed playlist '{removed['name']}'")
 
 
+def _pick_playlist(config: dict) -> dict | None:
+    """Prompt the user to pick a playlist from config, returning it or None."""
+    playlists = config["playlists"]
+    if not playlists:
+        _print_warning("No playlists in config.json")
+        return None
+    console.print()
+    for i, pl in enumerate(playlists):
+        console.print(f"  [cyan]{i + 1}[/] {pl['name']}")
+    console.print()
+    try:
+        idx = IntPrompt.ask(
+            "[bold]Playlist number[/]",
+            choices=[str(i + 1) for i in range(len(playlists))],
+        ) - 1
+        return playlists[idx]
+    except (ValueError, IndexError):
+        return None
+
+
+def _manage_webhooks() -> None:
+    """Submenu for setting/removing/testing Discord webhooks per playlist."""
+    env_path = BASE_DIR / ".env"
+
+    while True:
+        config = _load_config_safe()
+        if not config:
+            _wait_for_enter()
+            return
+
+        _print_header("Manage Discord webhooks")
+
+        table = Table(title="[bold cyan]Playlists[/]", box=box.SIMPLE)
+        table.add_column("#", style="bold cyan", width=3)
+        table.add_column("Playlist", style="bold")
+        table.add_column("Webhook")
+        for i, pl in enumerate(config["playlists"]):
+            key = discord_webhook_env_key(pl["name"])
+            status = "[green]✓ set[/]" if os.environ.get(key) else "[dim]—[/]"
+            table.add_row(str(i + 1), pl["name"], status)
+
+        console.print(table)
+        console.print()
+        console.print("[cyan]S[/] Set webhook   [cyan]R[/] Remove webhook")
+        console.print("[cyan]T[/] Test webhook   [cyan]0[/] Back")
+        console.print()
+
+        choice = Prompt.ask(
+            "[bold]Select[/]", choices=["S", "R", "T", "0"], default="0"
+        ).upper()
+
+        if choice == "0":
+            return
+
+        pl = _pick_playlist(config)
+        if not pl:
+            _wait_for_enter()
+            continue
+
+        name = pl["name"]
+        key = discord_webhook_env_key(name)
+
+        if choice == "S":
+            url = Prompt.ask(
+                "[bold]Discord webhook URL[/]",
+                default=os.environ.get(key, ""),
+            ).strip()
+            if not url:
+                _print_warning("No URL entered, skipping")
+                _wait_for_enter()
+                continue
+            if not env_path.exists():
+                env_path.touch()
+            set_key(str(env_path), key, url)
+            load_dotenv(env_path, override=True)
+            _print_success(f"Webhook set for '{name}'")
+            _wait_for_enter()
+
+        elif choice == "R":
+            if not os.environ.get(key):
+                _print_warning(f"No webhook set for '{name}'")
+            else:
+                unset_key(str(env_path), key)
+                load_dotenv(env_path, override=True)
+                _print_success(f"Webhook removed for '{name}'")
+            _wait_for_enter()
+
+        elif choice == "T":
+            url = os.environ.get(key)
+            if not url:
+                _print_error(f"No webhook set for '{name}' — set one first (S)")
+                _wait_for_enter()
+                continue
+            _print_info(f"Sending test message to '{name}' webhook…")
+            try:
+                send_test(url, name)
+                _print_success("Test message sent — check your Discord channel")
+            except Exception as e:
+                _print_error(f"Failed to send test: {e}")
+            _wait_for_enter()
+
+
 # ─── Main Loop ──────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -438,6 +541,8 @@ def main() -> None:
     if not sys.stdout.isatty():
         _err.print("Interactive mode requires a terminal. Use 'python sync.py' for non-interactive sync.")
         sys.exit(1)
+
+    load_dotenv(BASE_DIR / ".env")
 
     while True:
         try:
@@ -453,6 +558,8 @@ def main() -> None:
                 _view_status()
             elif choice == 4:
                 _manage_config()
+            elif choice == 5:
+                _manage_webhooks()
         except KeyboardInterrupt:
             console.print("\n\n[bold yellow]Interrupted. Exiting.[/]")
             break

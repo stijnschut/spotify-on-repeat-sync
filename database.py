@@ -131,6 +131,21 @@ class TrackDatabase:
             ).fetchall()
             return [r["track_id"] for r in rows]
 
+    def get_track_sources(
+        self, playlist_name: str, track_ids: list[str]
+    ) -> dict[str, str]:
+        """Return {track_id: source_user} for the given tracks in this playlist."""
+        if not track_ids:
+            return {}
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in track_ids)
+            rows = conn.execute(
+                f"SELECT track_id, source_user FROM tracks "
+                f"WHERE playlist_name = ? AND track_id IN ({placeholders})",
+                [playlist_name] + track_ids,
+            ).fetchall()
+            return {r["track_id"]: r["source_user"] for r in rows}
+
     def refresh_tracks(
         self, playlist_name: str, track_ids: list[str], today: str
     ) -> list[str]:

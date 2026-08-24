@@ -22,6 +22,7 @@ python cli.py
   2  Add a user (run Spotify OAuth login)
   3  View playlist status
   4  Manage users & playlists (edit config)
+  5  Manage Discord webhooks
 
   0  Exit
 ```
@@ -165,6 +166,34 @@ Logs land in `logs/sync_<date>.log` (and also just print to the screen).
 | Automated sync (daily cron / NAS task) | `python sync.py` (non-interactive) |
 
 Both share the same database and config files — switch freely between them.
+
+## Discord notifications (patch notes)
+
+Each playlist can optionally send a Discord webhook after every sync,
+reporting which songs were added and removed:
+
+```
+🟢 Songs added (+2)
+Kendrick Lamar - HUMBLE. (by Stijn)
+Tame Impala - The Less I Know The Better (by Funkert)
+
+🔴 Songs removed (-1)
+Drake - God's Plan
+```
+
+**Setup** — either:
+
+- In the interactive CLI: `python cli.py` → option 5 (Manage Discord webhooks), or
+- By hand in `.env`:
+  ```
+  DISCORD_WEBHOOK_YOU_AND_FRIEND=https://discord.com/api/webhooks/...
+  ```
+
+Notes:
+- One webhook per playlist (`DISCORD_WEBHOOK_<NAME>`). Playlists without one are simply skipped.
+- No changes (`+0 / -0`) → no message is sent (avoids noise).
+- `sync.py --dry-run` never sends webhooks.
+- Use the CLI's **Test webhook** option to send a sample message and verify a URL works.
 
 ## Easy to extend
 

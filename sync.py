@@ -34,11 +34,13 @@ from pathlib import Path
 
 from database import TrackDatabase
 from dotenv import load_dotenv
+from notify import send_patch_notes
 from spotify_client import (
     add_tracks,
     get_client_for_user,
     get_playlist_track_ids,
     get_top_track_ids,
+    get_track_names,
     remove_tracks,
 )
 
@@ -130,6 +132,16 @@ def get_playlist_id(playlist_name: str) -> str:
             f"Missing {env_key} in .env - add the shared playlist's link/ID there"
         )
     return playlist_id
+
+
+def discord_webhook_env_key(playlist_name: str) -> str:
+    """Return the .env key for a playlist's optional Discord webhook URL."""
+    return "DISCORD_WEBHOOK_" + re.sub(r"[^A-Za-z0-9]", "_", playlist_name).upper()
+
+
+def get_discord_webhook(playlist_name: str) -> str | None:
+    """Return the Discord webhook URL for a playlist, or None if unset."""
+    return os.environ.get(discord_webhook_env_key(playlist_name))
 
 
 def add_new_track(
@@ -350,6 +362,52 @@ def sync_playlist(
         remove_tracks(sp_owner, spotify_playlist_id, to_remove)
     if to_add:
         add_tracks(sp_owner, spotify_playlist_id, to_add)
+
+    # Send Discord patch notes if this playlist has a webhook configured.
+    _send_webhook_if_needed(
+        sp_owner, db, users_by_id, name, to_add, to_remove
+    )
+
+
+def _send_webhook_if_needed(
+    sp_owner: object,
+    db: TrackDatabase,
+    users_by_id: dict,
+    playlist_name: str,
+    to_add: list[str],
+    to_remove: list[str],
+) -> None:
+    """
+    Send Discord patch notes for a playlist's delta, if a webhook is
+    configured for that playlist and there is something to report.
+    Skips silently (no error) when no webhook is set or nothing changed.
+    """
+    webhook_url = get_discord_webhook(playlist_name)
+    if not webhook_url:
+        return
+    if not to_add and not to_remove:
+        return
+
+    # DB only stores IDs, so resolve names via Spotify for both added
+    # and removed tracks. Added tracks also get their source_user looked
+    # up from the DB, mapped to a friendly display name from the config.
+    names = get_track_names(sp_owner, list(set(to_add + to_remove)))
+    sources = db.get_track_sources(playlist_name, to_add)
+
+    added_lines: list[str] = []
+    for tid in to_add:
+        title = names.get(tid, tid)
+        uid = sources.get(tid, "?")
+        display = users_by_id.get(uid, {}).get("display_name", uid)
+        added_lines.append(f"{title} (by {display})")
+
+    removed_lines = [names.get(tid, tid) for tid in to_remove]
+
+    try:
+        send_patch_notes(webhook_url, playlist_name, added_lines, removed_lines)
+        logger.info("  Sent Discord patch notes for '%s'", playlist_name)
+    except Exception:
+        logger.exception("  Failed to send Discord webhook for '%s'", playlist_name)
 
 
 def main() -> None:
