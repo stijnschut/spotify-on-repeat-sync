@@ -69,7 +69,8 @@ def get_top_tracks(
     """
     The current user's top tracks over `time_range`, returned as a list
     of dicts with keys: id, display ("Artist - Title"), duration_ms,
-    and artists (list of artist names).
+    artists (list of artist names), and artist_ids (list of Spotify
+    artist IDs).
 
     ("short_term" ~4 weeks, "medium_term" ~6 months, "long_term" ~years).
     "short_term" is the closest match to what On Repeat used to represent.
@@ -96,6 +97,9 @@ def get_top_tracks(
                         "display": _track_display_name(item),
                         "duration_ms": item.get("duration_ms"),
                         "artists": [a.get("name", "") for a in item.get("artists", [])],
+                        "artist_ids": [
+                            a.get("id") for a in item.get("artists", []) if a.get("id")
+                        ],
                     }
                 )
         # Stop early if Spotify returned fewer tracks than requested (last page)

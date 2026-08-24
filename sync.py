@@ -255,6 +255,27 @@ def add_new_track(
         db.add_track(playlist_name, track_id, user_id, today)
 
 
+def _extract_artist_id(entry: str) -> str | None:
+    """
+    Extract a Spotify artist ID from a blacklist entry, or return None.
+    Accepts an artist URL (open.spotify.com/artist/<id>), a URI
+    (spotify:artist:<id>), or a bare 22-char base62 ID. Returns None
+    for anything else (treated as a plain name).
+    """
+    entry = entry.strip()
+    if not entry:
+        return None
+    m = re.search(r"artist/([A-Za-z0-9]+)", entry)
+    if m:
+        return m.group(1)
+    m = re.match(r"^spotify:artist:([A-Za-z0-9]+)$", entry)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[A-Za-z0-9]{22}", entry):
+        return entry
+    return None
+
+
 def _should_skip_track(
     track: dict, artist_blacklist: list[str] | None, max_duration_minutes: int | None
 ) -> bool:
@@ -263,10 +284,29 @@ def _should_skip_track(
         duration_ms = track.get("duration_ms")
         if duration_ms and duration_ms > max_duration_minutes * 60_000:
             return True
+
     if artist_blacklist:
-        blocked = {a.strip().lower() for a in artist_blacklist if a.strip()}
-        if any((a or "").strip().lower() in blocked for a in track.get("artists", [])):
+        blocked_ids: set[str] = set()
+        blocked_names: set[str] = set()
+        for entry in artist_blacklist:
+            if not isinstance(entry, str):
+                continue
+            artist_id = _extract_artist_id(entry)
+            if artist_id:
+                blocked_ids.add(artist_id)
+            elif entry.strip():
+                blocked_names.add(entry.strip().lower())
+
+        # IDs are unambiguous and preferred; names are a case-insensitive fallback.
+        if blocked_ids and any(
+            aid in blocked_ids for aid in track.get("artist_ids", [])
+        ):
             return True
+        if blocked_names and any(
+            (a or "").strip().lower() in blocked_names for a in track.get("artists", [])
+        ):
+            return True
+
     return False
 
 

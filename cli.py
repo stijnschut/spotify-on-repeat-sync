@@ -17,7 +17,7 @@ from rich.table import Table
 
 from database import TrackDatabase
 from notify import send_test
-from sync import discord_webhook_env_key, load_config
+from sync import discord_webhook_env_key, load_config, _extract_artist_id
 
 BASE_DIR = Path(__file__).resolve().parent
 console = Console()
@@ -589,12 +589,19 @@ def _settings_menu() -> None:
             return
 
         if choice == "A":
-            artist = Prompt.ask("[bold]Artist name[/]").strip()
+            artist = Prompt.ask(
+                "[bold]Artist[/] (name, Spotify link, or artist ID)"
+            ).strip()
             if not artist:
-                _print_warning("No name entered, skipping")
+                _print_warning("Nothing entered, skipping")
                 _wait_for_enter()
                 continue
-            if artist.lower() in [a.lower() for a in blacklist]:
+            # De-duplicate on the normalized form (ID for links/IDs, lowercase name otherwise)
+            normalized = _extract_artist_id(artist) or artist.lower()
+            existing = [
+                _extract_artist_id(a) or a.lower() for a in blacklist
+            ]
+            if normalized in existing:
                 _print_warning(f"'{artist}' is already blacklisted")
                 _wait_for_enter()
                 continue
