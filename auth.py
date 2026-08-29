@@ -15,11 +15,13 @@ on the Synology itself. It stores the resulting refresh token in
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import warnings
 from pathlib import Path
 
 from dotenv import load_dotenv, set_key
+from spotify_client import get_app_credentials
 from spotipy.oauth2 import CacheHandler, SpotifyOAuth, SpotifyOauthError
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -56,15 +58,31 @@ def main() -> None:
     user_id = args.user.strip().lower()
 
     load_dotenv(ENV_PATH)
-    client_id = os.environ.get("SPOTIFY_CLIENT_ID")
-    client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
+
+    # Find which Spotify app this user belongs to (from config.json's
+    # optional per-user "app" field; defaults to "app1").
+    app = "app1"
+    config_path = BASE_DIR / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            for u in config.get("users", []):
+                if u.get("id") == user_id:
+                    app = u.get("app", "app1")
+                    break
+        except (OSError, ValueError):
+            app = "app1"
+
     redirect_uri = os.environ.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
 
-    if not client_id or not client_secret:
+    try:
+        client_id, client_secret = get_app_credentials(app)
+    except RuntimeError as e:
         raise SystemExit(
-            "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET aren't set in .env yet.\n"
-            "Create 1 Spotify app first (see README) and put those two values in .env, "
-            "then try again."
+            f"{e}\n"
+            "Create the Spotify app first (see README) and put its client ID "
+            "and secret in .env, then try again."
         )
 
     auth_manager = SpotifyOAuth(

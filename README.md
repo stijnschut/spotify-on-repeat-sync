@@ -56,12 +56,12 @@ Adding a new playlist combination (e.g. with a third friend) = a new block in `c
 
 - Python 3.9 or higher
 - `pip install -r requirements.txt` (spotipy, python-dotenv, rich)
-- A free Spotify Developer account (for 1 "app" - see below)
-- Whoever creates the Spotify app (step 1) needs Spotify **Premium** for that - that's been a requirement from Spotify for "Development Mode" apps since February 2026. Everyone else doesn't need Premium, they just log in against that one app.
+- A free Spotify Developer account (for 1 or more "apps" - see below)
+- Whoever creates a Spotify app (step 1) needs Spotify **Premium** for that - that's been a requirement from Spotify for "Development Mode" apps since February 2026. Everyone else doesn't need Premium, they just log in against one of the apps.
 
 ## Setup
 
-### 1. Create one Spotify app
+### 1. Create one (or more) Spotify app(s)
 
 This only needs to happen once, for the whole project - not per person.
 
@@ -69,8 +69,12 @@ This only needs to happen once, for the whole project - not per person.
 2. **Create app**. Name/description don't matter.
 3. Under **Redirect URIs**: add `http://127.0.0.1:8888/callback`.
 4. Enable "Web API" under the requested APIs.
-5. Go to **User Management**, Add all users you want to sync with.
+5. Go to **User Management**, Add all users you want to sync with. Each app can have **at most 5 other users** (you + 5 = 6 total).
 6. Once created, you'll see **Client ID** and **Client Secret** (secret is behind "View client secret").
+
+> **Need more than 6 people?** Create a second app the same way, put its
+> Client ID / Secret in `.env` as `SPOTIFY_CLIENT_ID_2` / `SPOTIFY_CLIENT_SECRET_2`,
+> and mark those users with `"app": "app2"` in `config.json` (see step 5).
 
 ### 2. Set up the project
 
@@ -121,8 +125,8 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 ```json
 {
   "users": [
-    { "id": "you", "display_name": "You", "top_tracks_limit": 50 },
-    { "id": "friend", "display_name": "Friend", "top_tracks_limit": 50 }
+    { "id": "you", "display_name": "You", "app": "app1", "top_tracks_limit": 50 },
+    { "id": "friend", "display_name": "Friend", "app": "app1", "top_tracks_limit": 50 }
   ],
   "playlists": [
     {
@@ -140,7 +144,7 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 
 - `owner_user_id` must be someone who's logged in via `auth.py` - their account is used to actually edit the playlist (adding/removing tracks).
 - `max_per_user` is a fairness cap (no one person can fill the whole playlist), `max_total` is the real ceiling. `max_per_user × number of members` can be higher than `max_total` just fine - `max_total` simply applies as the hard limit.
-- Optional, per person under `users`: `"top_tracks_time_range"` (`short_term`/`medium_term`/`long_term`, default `short_term`) and `"top_tracks_limit"` (default 30, max 50; **recommended**: 50 for a 2-person playlist of 100) if you want to tune someone's window. Regardless of this limit, the script always fetches **2 pages** (via `offset`) so the effective pool is up to `2 × limit` tracks per user - enough to fill a 100-track playlist even with significant overlap.
+- Optional, per person under `users`: `"app"` (`app1` default, `app2` for a second Spotify app - see step 1), `"top_tracks_time_range"` (`short_term`/`medium_term`/`long_term`, default `short_term`), and `"top_tracks_limit"` (default 30, max 50; **recommended**: 50 for a 2-person playlist of 100).
 - Optional, top-level: `"artist_blacklist"` (artists to skip) and `"max_duration_minutes"` (drop tracks longer than this; `null` = no limit). Both can also be managed from the CLI → option 6 (Settings).
 - Each `artist_blacklist` entry can be a **name** ("P.T. Adamczyk", matched case-insensitively), an **artist ID** (`27VhXJzIph9c75cBh1e8XM`), or a **Spotify link/URI** (`https://open.spotify.com/artist/<id>` or `spotify:artist:<id>`). Using the link or ID is recommended — it's unambiguous, so no spelling worries.
 

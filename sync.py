@@ -37,6 +37,7 @@ from dotenv import load_dotenv
 from notify import send_patch_notes
 from spotify_client import (
     add_tracks,
+    get_app_credentials,
     get_client_for_user,
     get_playlist_tracks,
     get_top_tracks,
@@ -116,10 +117,14 @@ def load_config(path: Path) -> dict:
     return config
 
 
-def get_user_credentials(user_id: str) -> tuple[str, str, str]:
-    """Look up (client_id, client_secret, refresh_token) for a user from the environment."""
-    client_id = os.environ["SPOTIFY_CLIENT_ID"]
-    client_secret = os.environ["SPOTIFY_CLIENT_SECRET"]
+def get_user_credentials(user_id: str, app: str = "app1") -> tuple[str, str, str]:
+    """Look up (client_id, client_secret, refresh_token) for a user.
+
+    Uses the Spotify app that this user belongs to (see the "app" field
+    in config.json). The refresh token is app-specific, so the two must
+    match.
+    """
+    client_id, client_secret = get_app_credentials(app)
     env_key = f"REFRESH_TOKEN_{user_id.upper()}"
     refresh_token = os.environ.get(env_key)
     if not refresh_token:
@@ -347,7 +352,8 @@ def sync_playlist(
             continue
 
         try:
-            client_id, client_secret, refresh_token = get_user_credentials(user_id)
+            app = user_cfg.get("app", "app1")
+            client_id, client_secret, refresh_token = get_user_credentials(user_id, app)
             sp = get_client_for_user(client_id, client_secret, refresh_token)
             time_range = user_cfg.get("top_tracks_time_range", "short_term")
             limit = user_cfg.get("top_tracks_limit", 30)
@@ -413,7 +419,8 @@ def sync_playlist(
 
     owner_id = playlist_cfg["owner_user_id"]
     try:
-        client_id, client_secret, refresh_token = get_user_credentials(owner_id)
+        owner_app = users_by_id.get(owner_id, {}).get("app", "app1")
+        client_id, client_secret, refresh_token = get_user_credentials(owner_id, owner_app)
         sp_owner = get_client_for_user(client_id, client_secret, refresh_token)
     except Exception:
         logger.exception(

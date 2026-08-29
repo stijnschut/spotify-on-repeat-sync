@@ -305,10 +305,12 @@ def _manage_config() -> None:
         user_table.add_column("#", style="bold cyan", width=3)
         user_table.add_column("ID", style="bold")
         user_table.add_column("Display name")
+        user_table.add_column("App")
         user_table.add_column("Track limit", justify="right")
         for i, u in enumerate(config["users"]):
             user_table.add_row(
                 str(i + 1), u["id"], u.get("display_name", ""),
+                u.get("app", "app1"),
                 str(u.get("top_tracks_limit", 30)),
             )
         console.print(user_table)
@@ -332,11 +334,11 @@ def _manage_config() -> None:
         console.print()
 
         console.print("[cyan]A[/] Add user   [cyan]D[/] Delete user")
-        console.print("[cyan]P[/] Add playlist   [cyan]R[/] Remove playlist")
+        console.print("[cyan]E[/] Set user's app   [cyan]P[/] Add playlist   [cyan]R[/] Remove playlist")
         console.print("[cyan]0[/] Back to main menu")
         console.print()
 
-        choice = Prompt.ask("[bold]Select[/]", choices=["A", "D", "P", "R", "0"], default="0").upper()
+        choice = Prompt.ask("[bold]Select[/]", choices=["A", "D", "E", "P", "R", "0"], default="0").upper()
 
         if choice == "0":
             return
@@ -344,6 +346,8 @@ def _manage_config() -> None:
             _add_user_to_config(config)
         elif choice == "D":
             _delete_user_from_config(config)
+        elif choice == "E":
+            _set_user_app(config)
         elif choice == "P":
             _add_playlist_to_config(config)
         elif choice == "R":
@@ -357,13 +361,40 @@ def _add_user_to_config(config: dict) -> None:
     if not uid:
         return
     display = Prompt.ask("[bold]Display name[/]", default=uid.title()).strip()
+    app = Prompt.ask("[bold]Spotify app[/] (app1/app2)", choices=["app1", "app2"], default="app1")
     config["users"].append({
         "id": uid,
         "display_name": display,
+        "app": app,
         "top_tracks_limit": 50,
     })
     if _save_config(config):
-        _print_success(f"Added '{uid}'")
+        _print_success(f"Added '{uid}' on {app}")
+
+
+def _set_user_app(config: dict) -> None:
+    """Interactively change which Spotify app a user belongs to."""
+    _print_header("Set user's app")
+    users = config["users"]
+    if not users:
+        _print_warning("No users in config.json")
+        return
+    for i, u in enumerate(users):
+        console.print(f"  [cyan]{i + 1}[/] {u['id']} (current: {u.get('app', 'app1')})")
+    console.print()
+    try:
+        idx = IntPrompt.ask(
+            "[bold]User number[/]", choices=[str(i + 1) for i in range(len(users))]
+        ) - 1
+    except (ValueError, IndexError):
+        return
+    app = Prompt.ask(
+        "[bold]Spotify app[/] (app1/app2)", choices=["app1", "app2"],
+        default=users[idx].get("app", "app1"),
+    )
+    users[idx]["app"] = app
+    if _save_config(config):
+        _print_success(f"'{users[idx]['id']}' is now on {app}")
 
 
 def _delete_user_from_config(config: dict) -> None:

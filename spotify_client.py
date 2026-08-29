@@ -17,6 +17,8 @@ available stand-in for "songs you're currently into".
 
 from __future__ import annotations
 
+import os
+
 import requests
 import spotipy
 
@@ -28,6 +30,29 @@ MAX_TOP_TRACKS_LIMIT = 50
 # 2 pages = up to 100 tracks per user, giving enough unique material
 # to fill a 100-track playlist even when two users have significant overlap.
 TOP_TRACKS_PAGES = 2
+
+
+def app_env_suffix(app: str) -> str:
+    """Map an app id to its .env variable suffix.
+
+    "app1" -> ""  (uses the original SPOTIFY_CLIENT_ID / _SECRET)
+    "app2" -> "_2", "app3" -> "_3", etc.
+    """
+    num = app[3:] if app.startswith("app") else app
+    return "" if num == "1" else f"_{num}"
+
+
+def get_app_credentials(app: str = "app1") -> tuple[str, str]:
+    """Return (client_id, client_secret) for a Spotify app, from .env."""
+    suffix = app_env_suffix(app)
+    client_id = os.environ.get(f"SPOTIFY_CLIENT_ID{suffix}")
+    client_secret = os.environ.get(f"SPOTIFY_CLIENT_SECRET{suffix}")
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            f"Missing SPOTIFY_CLIENT_ID{suffix} / SPOTIFY_CLIENT_SECRET{suffix} in .env "
+            f"for app '{app}'"
+        )
+    return client_id, client_secret
 
 
 def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> str:
