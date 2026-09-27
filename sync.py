@@ -359,8 +359,10 @@ def sync_playlist(
             limit = user_cfg.get("top_tracks_limit", 30)
             tracks = get_top_tracks(sp, time_range=time_range, limit=limit)
             logger.info("  %s: %d top tracks (%s)", user_id, len(tracks), time_range)
-        except RuntimeError:
-            logger.warning("  %s: no token in .env, skipping", user_id)
+        except RuntimeError as e:
+            # Missing token, missing app credentials, or a failed token
+            # exchange (e.g. refresh token belongs to a different app).
+            logger.warning("  %s: %s - skipping this user for this run", user_id, e)
             continue
         except Exception:
             logger.exception(

@@ -67,7 +67,21 @@ def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> 
         },
         timeout=15,
     )
-    response.raise_for_status()
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            body = response.json()
+            detail = (
+                f"{body.get('error', '')} - {body.get('error_description', '')}"
+            ).strip(" -")
+        except ValueError:
+            detail = response.text.strip()[:200]
+        raise RuntimeError(
+            f"Spotify token exchange failed ({response.status_code})"
+            + (f": {detail}" if detail else "")
+            + ". The refresh token may belong to a different Spotify app - "
+              "re-run 'python auth.py --user <id>'."
+        )
     return response.json()["access_token"]
 
 
