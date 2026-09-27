@@ -95,7 +95,7 @@ def main() -> None:
     )
 
     auth_url = auth_manager.get_authorize_url()
-    print(f"\nLogging in for '{user_id}':\n")
+    print(f"\nLogging in for '{user_id}' using {app}:\n")
     print("1. Open the URL below and log in with THIS account (i.e. ", user_id, "'s own account):\n")
     print(f"   {auth_url}\n")
     print("2. Click 'Agree'. Spotify will then redirect you to a URL that looks")

@@ -226,12 +226,12 @@ def _select_playlists_and_sync() -> None:
 
 
 def _add_user() -> None:
-    """Guide the user through running auth.py for a new person."""
+    """Guide the user through adding a person and running their OAuth login."""
     _print_header("Add a user")
     _print_info(
-        "This runs the one-time Spotify OAuth login for a new person.\n"
-        "They'll need a browser and must already be added to your\n"
-        "Spotify Developer Dashboard under User Management."
+        "This adds the person to config.json and runs their one-time\n"
+        "Spotify OAuth login. They'll need a browser and must already\n"
+        "be added to your Spotify Developer Dashboard (on the right app)."
     )
     console.print()
 
@@ -241,12 +241,33 @@ def _add_user() -> None:
         _wait_for_enter()
         return
 
+    app = Prompt.ask("[bold]Spotify app[/] (app1/app2)", choices=["app1", "app2"], default="app1")
+    display = Prompt.ask("[bold]Display name[/]", default=user_id.title()).strip()
+
+    # Ensure the user exists in config.json with the right app BEFORE
+    # running auth.py, so the refresh token is bound to the correct app.
+    config = _load_config_safe()
+    if config:
+        users = config.setdefault("users", [])
+        existing = next((u for u in users if u.get("id") == user_id), None)
+        if existing:
+            existing["app"] = app
+            existing["display_name"] = display or existing.get("display_name", user_id)
+        else:
+            users.append({
+                "id": user_id,
+                "display_name": display,
+                "app": app,
+                "top_tracks_limit": 50,
+            })
+        _save_config(config)
+
     cmd = [sys.executable, str(BASE_DIR / "auth.py"), "--user", user_id]
-    console.print(f"\n[dim]Running: {' '.join(cmd)}[/]\n")
+    console.print(f"\n[dim]Running: {' '.join(cmd)} (using {app})[/]\n")
 
     result = subprocess.run(cmd)
     if result.returncode == 0:
-        _print_success(f"'{user_id}' logged in. Now add them to a playlist in the config.")
+        _print_success(f"'{user_id}' logged in using {app}. Now add them to a playlist (option 4).")
     else:
         _print_error("Login failed — check the output above.")
 
