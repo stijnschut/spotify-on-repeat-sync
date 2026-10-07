@@ -703,7 +703,7 @@ def _settings_menu() -> None:
 
 
 def _view_sync_history() -> None:
-    """Show the last few sync runs for a playlist, including skips."""
+    """Show the current playlist contents plus the last run's summary."""
     config = _load_config_safe()
     if not config:
         _wait_for_enter()
@@ -714,31 +714,28 @@ def _view_sync_history() -> None:
         return
 
     db = TrackDatabase(BASE_DIR / "spotify_sync.db")
-    history = db.get_sync_history(pl["name"], limit=3)
+    snapshot = db.get_playlist_snapshot(pl["name"])
+    history = db.get_sync_history(pl["name"], limit=1)
 
-    if not history:
-        _print_info(f"No sync history yet for '{pl['name']}'. Run a sync first.")
-        _wait_for_enter()
-        return
+    _print_header(f"{pl['name']} — current contents")
 
-    for run in history:
-        _print_header(f"{pl['name']} — sync on {run['run_date']}")
-        s = run["summary"]
+    if snapshot:
+        console.print("[bold cyan]In playlist[/]")
+        for user, titles in snapshot.items():
+            console.print(f"  [bold]{user}[/]")
+            for t in titles:
+                console.print(f"    {t}")
+    else:
+        console.print("[dim]Playlist is empty. Run a real sync first.[/]")
+    console.print()
 
-        added = s.get("added") or {}
+    if history:
+        s = history[0]["summary"]
+        _print_header(f"Last run — {history[0]['run_date']}")
+
         removed = s.get("removed") or []
         skipped = s.get("skipped") or []
         auth_failed = s.get("auth_failed") or []
-
-        if added:
-            console.print("[bold green]Added[/]")
-            for user, titles in added.items():
-                console.print(f"  [bold]{user}[/]")
-                for t in titles:
-                    console.print(f"    {t}")
-        else:
-            console.print("[dim]No tracks added[/]")
-        console.print()
 
         if removed:
             console.print("[bold red]Removed[/]")
@@ -751,7 +748,9 @@ def _view_sync_history() -> None:
         if skipped:
             console.print("[bold yellow]Skipped[/]")
             for item in skipped:
-                console.print(f"  {item.get('track')} ({item.get('user')}) — {item.get('reason')}")
+                console.print(
+                    f"  {item.get('track')} ({item.get('user')}) — {item.get('reason')}"
+                )
         else:
             console.print("[dim]No tracks skipped[/]")
         console.print()
@@ -761,6 +760,8 @@ def _view_sync_history() -> None:
             for u in auth_failed:
                 console.print(f"  {u}")
             console.print()
+    else:
+        _print_info("No sync history yet — run a real sync first.")
 
     _wait_for_enter()
 

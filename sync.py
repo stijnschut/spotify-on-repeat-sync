@@ -507,7 +507,11 @@ def sync_playlist(
         uid = sources.get(tid, "?")
         display = users_by_id.get(uid, {}).get("display_name", uid)
         added_grouped.setdefault(display, []).append(title)
+
     removed_lines = [names_by_id.get(tid, tid) for tid in to_remove]
+
+    # Cache names so the "In playlist" view can always show real titles.
+    db.save_track_names(names_by_id)
 
     # Record this run so it can be reviewed later from the CLI.
     db.record_sync_run(
@@ -523,6 +527,7 @@ def sync_playlist(
 
     # Send Discord patch notes if this playlist has a webhook configured.
     _send_webhook_if_needed(name, added_grouped, removed_lines)
+
 
 
 def _send_webhook_if_needed(

@@ -65,6 +65,14 @@ class TrackDatabase:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS track_names (
+                    track_id     TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL
+                )
+                """
+            )
 
     def track_exists(self, playlist_name: str, track_id: str) -> bool:
         with self._connect() as conn:
@@ -172,12 +180,10 @@ class TrackDatabase:
         with hundreds of tracks from multiple users.
         """
         with self._connect() as conn:
-            # First, bulk-update all existing tracks
             conn.executemany(
                 "UPDATE tracks SET last_seen = ? WHERE playlist_name = ? AND track_id = ?",
                 [(today, playlist_name, tid) for tid in track_ids],
             )
-            # Then find which ones actually matched (existed)
             placeholders = ",".join("?" for _ in track_ids)
             existing = set(
                 row[0]
@@ -187,6 +193,38 @@ class TrackDatabase:
                 ).fetchall()
             )
         return [tid for tid in track_ids if tid not in existing]
+
+    def save_track_names(self, names: dict[str, str]) -> None:
+        """Cache display names for tracks (upsert)."""
+        if not names:
+            return
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO track_names (track_id, display_name) VALUES (?, ?)
+                ON CONFLICT(track_id) DO UPDATE SET display_name = excluded.display_name
+                """,
+                list(names.items()),
+            )
+
+    def get_playlist_snapshot(self, playlist_name: str) -> dict[str, list[str]]:
+        """Return {source_user: [display names]} for every track currently
+        in this playlist, ordered oldest-added first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.source_user, COALESCE(n.display_name, t.track_id) AS name
+                FROM tracks t
+                LEFT JOIN track_names n ON n.track_id = t.track_id
+                WHERE t.playlist_name = ?
+                ORDER BY t.added_date ASC, t.track_id ASC
+                """,
+                (playlist_name,),
+            ).fetchall()
+        result: dict[str, list[str]] = {}
+        for r in rows:
+            result.setdefault(r["source_user"], []).append(r["name"])
+        return result
 
     def record_sync_run(
         self, playlist_name: str, run_date: str, summary: dict
