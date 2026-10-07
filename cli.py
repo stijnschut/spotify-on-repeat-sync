@@ -103,6 +103,7 @@ def _show_home_menu(version: str = "") -> int:
         ("4", "Manage users & playlists (edit config)"),
         ("5", "Manage Discord webhooks"),
         ("6", "Settings (artist blacklist, max duration)"),
+        ("7", "View sync history"),
         ("0", "Exit"),
     ]
 
@@ -117,7 +118,7 @@ def _show_home_menu(version: str = "") -> int:
 
     choice = Prompt.ask(
         "[bold]Select an option[/]",
-        choices=[str(i) for i in range(7)],
+        choices=[str(i) for i in range(8)],
         default="0",
     )
     return int(choice)
@@ -701,6 +702,69 @@ def _settings_menu() -> None:
             _wait_for_enter()
 
 
+def _view_sync_history() -> None:
+    """Show the last few sync runs for a playlist, including skips."""
+    config = _load_config_safe()
+    if not config:
+        _wait_for_enter()
+        return
+    pl = _pick_playlist(config)
+    if not pl:
+        _wait_for_enter()
+        return
+
+    db = TrackDatabase(BASE_DIR / "spotify_sync.db")
+    history = db.get_sync_history(pl["name"], limit=3)
+
+    if not history:
+        _print_info(f"No sync history yet for '{pl['name']}'. Run a sync first.")
+        _wait_for_enter()
+        return
+
+    for run in history:
+        _print_header(f"{pl['name']} — sync on {run['run_date']}")
+        s = run["summary"]
+
+        added = s.get("added") or {}
+        removed = s.get("removed") or []
+        skipped = s.get("skipped") or []
+        auth_failed = s.get("auth_failed") or []
+
+        if added:
+            console.print("[bold green]Added[/]")
+            for user, titles in added.items():
+                console.print(f"  [bold]{user}[/]")
+                for t in titles:
+                    console.print(f"    {t}")
+        else:
+            console.print("[dim]No tracks added[/]")
+        console.print()
+
+        if removed:
+            console.print("[bold red]Removed[/]")
+            for t in removed:
+                console.print(f"  {t}")
+        else:
+            console.print("[dim]No tracks removed[/]")
+        console.print()
+
+        if skipped:
+            console.print("[bold yellow]Skipped[/]")
+            for item in skipped:
+                console.print(f"  {item.get('track')} ({item.get('user')}) — {item.get('reason')}")
+        else:
+            console.print("[dim]No tracks skipped[/]")
+        console.print()
+
+        if auth_failed:
+            console.print("[bold red]Could not fetch top tracks for[/]")
+            for u in auth_failed:
+                console.print(f"  {u}")
+            console.print()
+
+    _wait_for_enter()
+
+
 # ─── Main Loop ──────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -729,6 +793,8 @@ def main() -> None:
                 _manage_webhooks()
             elif choice == 6:
                 _settings_menu()
+            elif choice == 7:
+                _view_sync_history()
         except KeyboardInterrupt:
             console.print("\n\n[bold yellow]Interrupted. Exiting.[/]")
             break

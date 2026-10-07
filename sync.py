@@ -169,7 +169,7 @@ def add_new_track(
     max_per_user: int,
     today: str,
     dry_run: bool,
-) -> None:
+) -> str | None:
     """
     Place one brand-new track (not yet tracked at all) into a playlist
     that's already had ALL of today's "still active" tracks refreshed
@@ -177,6 +177,9 @@ def add_new_track(
     happened, anything still eligible for eviction here has genuinely
     fallen out of everyone's top tracks - not just tracks that simply
     haven't been re-checked yet this run.
+
+    Returns a skip reason ("cap") when the track couldn't be placed,
+    otherwise None (added, swapped, or already claimed by another user).
 
     - There's room (both totals)?        -> add it.
     - That user is at their own cap?     -> evict THAT user's own
@@ -202,7 +205,7 @@ def add_new_track(
     if db.track_exists(playlist_name, track_id):
         if not dry_run:
             db.update_last_seen(playlist_name, track_id, today)
-        return
+        return None
 
     user_count = db.count_for_user(playlist_name, user_id)
     if user_count >= max_per_user:
@@ -215,7 +218,7 @@ def add_new_track(
                 max_per_user,
                 track_id,
             )
-            return
+            return "cap"
         logger.info(
             "  %s at cap (%d/%d): swapping out %s for %s",
             user_id,
@@ -227,7 +230,7 @@ def add_new_track(
         if not dry_run:
             db.remove_track(playlist_name, oldest["track_id"])
             db.add_track(playlist_name, track_id, user_id, today)
-        return
+        return None
 
     total_count = db.count_total(playlist_name)
     if total_count >= max_total:
@@ -240,7 +243,7 @@ def add_new_track(
                 track_id,
                 user_id,
             )
-            return
+            return "cap"
         logger.info(
             "  Playlist full (%d/%d): swapping out %s (from %s) for %s (from %s)",
             total_count,
@@ -253,11 +256,12 @@ def add_new_track(
         if not dry_run:
             db.remove_track(playlist_name, oldest["track_id"])
             db.add_track(playlist_name, track_id, user_id, today)
-        return
+        return None
 
     logger.info("  Adding new track %s from %s", track_id, user_id)
     if not dry_run:
         db.add_track(playlist_name, track_id, user_id, today)
+    return None
 
 
 def _extract_artist_id(entry: str) -> str | None:
@@ -281,14 +285,14 @@ def _extract_artist_id(entry: str) -> str | None:
     return None
 
 
-def _should_skip_track(
+def _skip_reason(
     track: dict, artist_blacklist: list[str] | None, max_duration_minutes: int | None
-) -> bool:
-    """Return True if a track should be ignored (blacklisted artist or too long)."""
+) -> str | None:
+    """Return why a track should be skipped, or None if it should be kept."""
     if max_duration_minutes:
         duration_ms = track.get("duration_ms")
         if duration_ms and duration_ms > max_duration_minutes * 60_000:
-            return True
+            return "duration"
 
     if artist_blacklist:
         blocked_ids: set[str] = set()
@@ -306,13 +310,13 @@ def _should_skip_track(
         if blocked_ids and any(
             aid in blocked_ids for aid in track.get("artist_ids", [])
         ):
-            return True
+            return "blacklist"
         if blocked_names and any(
             (a or "").strip().lower() in blocked_names for a in track.get("artists", [])
         ):
-            return True
+            return "blacklist"
 
-    return False
+    return None
 
 
 def sync_playlist(
@@ -341,6 +345,10 @@ def sync_playlist(
     # later for the Discord patch notes (avoids a separate metadata API
     # call, which Spotify's 2026 API restricts).
     names_by_id: dict[str, str] = {}
+    # For the sync history: tracks we skipped (with reason) and users
+    # whose top tracks couldn't be fetched this run.
+    skipped_list: list[dict] = []
+    auth_failed: list[str] = []
 
     for user_id in playlist_cfg["members"]:
         user_cfg = users_by_id.get(user_id)
@@ -362,9 +370,11 @@ def sync_playlist(
         except RuntimeError as e:
             # Missing token, missing app credentials, or a failed token
             # exchange (e.g. refresh token belongs to a different app).
+            auth_failed.append(user_cfg.get("display_name", user_id))
             logger.warning("  %s: %s - skipping this user for this run", user_id, e)
             continue
         except Exception:
+            auth_failed.append(user_cfg.get("display_name", user_id))
             logger.exception(
                 "  Failed to read top tracks for %s - skipping this user for this run",
                 user_id,
@@ -377,10 +387,25 @@ def sync_playlist(
         for t in tracks:
             names_by_id[t["id"]] = t["display"]
 
-        kept = [t for t in tracks if not _should_skip_track(t, artist_blacklist, max_duration_minutes)]
-        skipped = len(tracks) - len(kept)
-        if skipped:
-            logger.info("  %s: filtered out %d track(s) (blacklist/duration)", user_id, skipped)
+        kept: list[dict] = []
+        for t in tracks:
+            reason = _skip_reason(t, artist_blacklist, max_duration_minutes)
+            if reason:
+                skipped_list.append(
+                    {
+                        "user": user_cfg.get("display_name", user_id),
+                        "track": t["display"],
+                        "reason": reason,
+                    }
+                )
+            else:
+                kept.append(t)
+        if len(tracks) - len(kept):
+            logger.info(
+                "  %s: filtered out %d track(s) (blacklist/duration)",
+                user_id,
+                len(tracks) - len(kept),
+            )
 
         track_ids = [t["id"] for t in kept]
 
@@ -404,9 +429,17 @@ def sync_playlist(
         for uid in list(by_user.keys()):
             if by_user[uid]:
                 tid = by_user[uid].pop(0)
-                add_new_track(
+                reason = add_new_track(
                     db, name, tid, uid, max_total, max_per_user, today, dry_run
                 )
+                if reason:
+                    skipped_list.append(
+                        {
+                            "user": users_by_id.get(uid, {}).get("display_name", uid),
+                            "track": names_by_id.get(tid, tid),
+                            "reason": reason,
+                        }
+                    )
         _round += 1
         if _round > 200:
             break
@@ -465,46 +498,45 @@ def sync_playlist(
     if to_add:
         add_tracks(sp_owner, spotify_playlist_id, to_add)
 
-    # Send Discord patch notes if this playlist has a webhook configured.
-    _send_webhook_if_needed(
-        db, users_by_id, names_by_id, name, to_add, to_remove
-    )
-
-
-def _send_webhook_if_needed(
-    db: TrackDatabase,
-    users_by_id: dict,
-    names_by_id: dict[str, str],
-    playlist_name: str,
-    to_add: list[str],
-    to_remove: list[str],
-) -> None:
-    """
-    Send Discord patch notes for a playlist's delta, if a webhook is
-    configured for that playlist and there is something to report.
-    Skips silently (no error) when no webhook is set or nothing changed.
-    """
-    webhook_url = get_discord_webhook(playlist_name)
-    if not webhook_url:
-        return
-    if not to_add and not to_remove:
-        return
-
-    # Resolve display names from the map we already built this run
-    # (top tracks + current playlist), so we never need a separate
-    # metadata call. Added tracks also get their source_user looked up
-    # from the DB, mapped to a friendly display name from the config,
-    # then grouped per user for the Discord embed.
-    sources = db.get_track_sources(playlist_name, to_add)
-
+    # Build a human-readable delta (added per user, removed flat) shared
+    # by the Discord webhook and the sync history log.
+    sources = db.get_track_sources(name, to_add)
     added_grouped: dict[str, list[str]] = {}
     for tid in to_add:
         title = names_by_id.get(tid, tid)
         uid = sources.get(tid, "?")
         display = users_by_id.get(uid, {}).get("display_name", uid)
         added_grouped.setdefault(display, []).append(title)
-
     removed_lines = [names_by_id.get(tid, tid) for tid in to_remove]
+
+    # Record this run so it can be reviewed later from the CLI.
+    db.record_sync_run(
+        name,
+        today,
+        {
+            "added": added_grouped,
+            "removed": removed_lines,
+            "skipped": skipped_list,
+            "auth_failed": auth_failed,
+        },
+    )
+
+    # Send Discord patch notes if this playlist has a webhook configured.
+    _send_webhook_if_needed(name, added_grouped, removed_lines)
+
+
+def _send_webhook_if_needed(
+    playlist_name: str,
+    added_grouped: dict[str, list[str]],
+    removed_lines: list[str],
+) -> None:
+    """Send Discord patch notes for a playlist's delta, if a webhook is
+    configured for that playlist and there is something to report."""
+    webhook_url = get_discord_webhook(playlist_name)
+    if not webhook_url:
+        return
+    if not added_grouped and not removed_lines:
+        return
 
     try:
         send_patch_notes(webhook_url, playlist_name, added_grouped, removed_lines)

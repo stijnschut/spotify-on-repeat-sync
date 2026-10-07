@@ -14,9 +14,13 @@ keeps the database dumb and the business logic in one obvious place.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+
+# How many sync runs to keep in history per playlist (viewing shows fewer).
+MAX_HISTORY = 10
 
 
 class TrackDatabase:
@@ -48,6 +52,16 @@ class TrackDatabase:
                     added_date    TEXT NOT NULL,
                     last_seen     TEXT NOT NULL,
                     PRIMARY KEY (playlist_name, track_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sync_history (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_name TEXT NOT NULL,
+                    run_date      TEXT NOT NULL,
+                    summary       TEXT NOT NULL
                 )
                 """
             )
@@ -173,3 +187,42 @@ class TrackDatabase:
                 ).fetchall()
             )
         return [tid for tid in track_ids if tid not in existing]
+
+    def record_sync_run(
+        self, playlist_name: str, run_date: str, summary: dict
+    ) -> None:
+        """Store one sync run's summary and prune history to MAX_HISTORY."""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO sync_history (playlist_name, run_date, summary) VALUES (?, ?, ?)",
+                (playlist_name, run_date, json.dumps(summary, ensure_ascii=False)),
+            )
+            conn.execute(
+                """
+                DELETE FROM sync_history
+                WHERE playlist_name = ? AND id NOT IN (
+                    SELECT id FROM sync_history
+                    WHERE playlist_name = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                )
+                """,
+                (playlist_name, playlist_name, MAX_HISTORY),
+            )
+
+    def get_sync_history(self, playlist_name: str, limit: int = 3) -> list[dict]:
+        """Return the most recent sync summaries for a playlist, newest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT run_date, summary FROM sync_history "
+                "WHERE playlist_name = ? ORDER BY id DESC LIMIT ?",
+                (playlist_name, limit),
+            ).fetchall()
+        result = []
+        for r in rows:
+            try:
+                summary = json.loads(r["summary"])
+            except (json.JSONDecodeError, TypeError):
+                summary = {}
+            result.append({"run_date": r["run_date"], "summary": summary})
+        return result

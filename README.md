@@ -24,6 +24,7 @@ python cli.py
   4  Manage users & playlists (edit config)
   5  Manage Discord webhooks
   6  Settings (artist blacklist, max duration)
+  7  View sync history
 
   0  Exit
 ```
@@ -175,6 +176,36 @@ Logs land in `logs/sync_<date>.log` (and also just print to the screen).
 | Automated sync (daily cron / NAS task) | `python sync.py` (non-interactive) |
 
 Both share the same database and config files — switch freely between them.
+
+## Sync history
+
+Every real sync records a summary per playlist in the database. View the
+last few runs from the CLI (`python cli.py` → option 7):
+
+```
+prikkers — sync on 2026-09-27
+
+Added
+  Funkert
+    Featurette - Xanax
+    ...
+
+Removed
+  BLØF - Liefs Uit Londen
+  ...
+
+Skipped
+  Track - Artist (Max) — blacklist
+  Track - Artist (Jon) — duration
+
+Could not fetch top tracks for
+  Samuel
+```
+
+Unlike the Discord webhook, this also shows what was **skipped and why**
+(`blacklist`, `duration`, or `cap` when there's no room) and which users
+couldn't be fetched (e.g. an invalid app credential). History is capped
+at the last 10 runs per playlist; the CLI shows the latest 3.
 
 ## Discord notifications (patch notes)
 
