@@ -39,7 +39,6 @@ from notify import send_patch_notes
 from spotify_client import (
     add_tracks,
     get_app_credentials,
-    get_client_credentials_client,
     get_client_for_user,
     get_playlist_track_ids,
     get_playlist_tracks,
@@ -585,11 +584,35 @@ def refresh_playlist_blacklist(config: dict, db: TrackDatabase) -> int:
         db.set_blacklist_tracks([])
         return 0
 
-    try:
-        client_id, client_secret = get_app_credentials("app1")
-        sp = get_client_credentials_client(client_id, client_secret)
-    except Exception:
-        logger.exception("Could not authenticate for playlist blacklist refresh")
+    # Spotify's Get Playlist Items endpoint requires a *user* access token
+    # (client credentials are rejected with "Valid user authentication
+    # required"), so authenticate as one of the configured users. Try each
+    # user until one's refresh token works - reading a public playlist only
+    # needs any valid user token, not the playlist owner.
+    sp = None
+    for user in config.get("users") or []:
+        user_id = user.get("id")
+        if not user_id:
+            continue
+        try:
+            app = user.get("app", "app1")
+            client_id, client_secret, refresh_token = get_user_credentials(
+                user_id, app
+            )
+            sp = get_client_for_user(client_id, client_secret, refresh_token)
+            logger.info("Using '%s' to read playlist blacklist sources", user_id)
+            break
+        except Exception:
+            logger.exception(
+                "Could not authenticate as '%s' for playlist blacklist refresh",
+                user_id,
+            )
+            continue
+
+    if sp is None:
+        logger.error(
+            "No usable user credentials for playlist blacklist refresh - skipping"
+        )
         return 0
 
     all_ids: set[str] = set()

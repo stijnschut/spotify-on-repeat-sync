@@ -788,9 +788,16 @@ def _manage_playlist_blacklist() -> None:
         elif choice == "F":
             _print_info("Refreshing playlist blacklist cache…")
             count = refresh_playlist_blacklist(config, db)
-            _print_success(
-                f"Playlist blacklist cache refreshed ({count} track(s) cached)"
-            )
+            if count:
+                _print_success(
+                    f"Playlist blacklist cache refreshed ({count} track(s) cached)"
+                )
+            elif links:
+                _print_warning(
+                    "Refresh cached 0 track(s) — check the sources/credentials above"
+                )
+            else:
+                _print_success("Playlist blacklist cache cleared (no sources configured)")
             _wait_for_enter()
 
 

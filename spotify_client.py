@@ -93,37 +93,6 @@ def get_client_for_user(
     return spotipy.Spotify(auth=access_token)
 
 
-def get_client_credentials_client(
-    client_id: str, client_secret: str
-) -> spotipy.Spotify:
-    """Build an app-level (client credentials) client for public data.
-
-    Used by the playlist blacklist refresh, which only needs to read
-    public playlists - no user refresh token required.
-    """
-    response = requests.post(
-        TOKEN_URL,
-        data={"grant_type": "client_credentials"},
-        auth=(client_id, client_secret),
-        timeout=15,
-    )
-    if response.status_code >= 400:
-        detail = ""
-        try:
-            body = response.json()
-            detail = (
-                f"{body.get('error', '')} - {body.get('error_description', '')}"
-            ).strip(" -")
-        except ValueError:
-            detail = response.text.strip()[:200]
-        raise RuntimeError(
-            f"Spotify client-credentials token exchange failed "
-            f"({response.status_code})"
-            + (f": {detail}" if detail else "")
-        )
-    return spotipy.Spotify(auth=response.json()["access_token"])
-
-
 def _track_display_name(track: dict) -> str:
     """Build a 'Artist1, Artist2 - Title' string from a Spotify track object."""
     artists = ", ".join(a.get("name", "") for a in track.get("artists", []))
