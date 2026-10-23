@@ -17,7 +17,12 @@ from rich.table import Table
 
 from database import TrackDatabase
 from notify import send_test
-from sync import discord_webhook_env_key, load_config, _extract_artist_id
+from sync import (
+    discord_webhook_env_key,
+    load_config,
+    refresh_playlist_blacklist,
+    _extract_artist_id,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 console = Console()
@@ -102,7 +107,7 @@ def _show_home_menu(version: str = "") -> int:
         ("3", "View playlist status"),
         ("4", "Manage users & playlists (edit config)"),
         ("5", "Manage Discord webhooks"),
-        ("6", "Settings (artist blacklist, max duration)"),
+        ("6", "Settings (artist blacklist, playlist blacklist, max duration)"),
         ("7", "View sync history"),
         ("0", "Exit"),
     ]
@@ -607,7 +612,7 @@ def _manage_webhooks() -> None:
 
 
 def _settings_menu() -> None:
-    """Submenu for global sync filters: artist blacklist + max duration."""
+    """Submenu for global sync filters: artist/playlist blacklist + max duration."""
     while True:
         config = _load_config_safe()
         if not config:
@@ -618,6 +623,7 @@ def _settings_menu() -> None:
 
         blacklist = config.get("artist_blacklist") or []
         max_dur = config.get("max_duration_minutes")
+        pb_links = config.get("playlist_blacklist") or []
 
         table = Table(box=box.SIMPLE, title="[bold cyan]Sync filters[/]")
         table.add_column("Setting", style="bold")
@@ -630,13 +636,20 @@ def _settings_menu() -> None:
             "Max song duration",
             f"{max_dur} min" if max_dur else "[dim]no limit[/]",
         )
+        table.add_row(
+            "Playlist blacklist",
+            f"{len(pb_links)} source(s)" if pb_links else "[dim](none)[/]",
+        )
         console.print(table)
         console.print()
         console.print("[cyan]A[/] Add artist to blacklist   [cyan]R[/] Remove artist")
-        console.print("[cyan]D[/] Set max duration   [cyan]0[/] Back")
+        console.print("[cyan]D[/] Set max duration   [cyan]P[/] Playlist blacklist")
+        console.print("[cyan]0[/] Back")
         console.print()
 
-        choice = Prompt.ask("[bold]Select[/]", choices=["A", "R", "D", "0"], default="0").upper()
+        choice = Prompt.ask(
+            "[bold]Select[/]", choices=["A", "R", "D", "P", "0"], default="0"
+        ).upper()
 
         if choice == "0":
             return
@@ -699,6 +712,85 @@ def _settings_menu() -> None:
                 except ValueError:
                     _print_error("Invalid number")
             _save_config(config)
+            _wait_for_enter()
+
+        elif choice == "P":
+            _manage_playlist_blacklist()
+
+
+def _manage_playlist_blacklist() -> None:
+    """Submenu for the playlist blacklist: add/remove sources, refresh cache."""
+    while True:
+        config = _load_config_safe()
+        if not config:
+            _wait_for_enter()
+            return
+
+        links = config.get("playlist_blacklist") or []
+        db = TrackDatabase(BASE_DIR / "spotify_sync.db")
+        cached = len(db.get_blacklist_track_ids())
+
+        _print_header("Playlist blacklist")
+        console.print(f"[dim]Cached tracks in DB: {cached}[/]")
+        console.print()
+
+        if links:
+            for i, link in enumerate(links):
+                console.print(f"  [cyan]{i + 1}[/] {link}")
+        else:
+            console.print("  [dim](no source playlists configured)[/]")
+        console.print()
+        console.print("[cyan]A[/] Add source playlist   [cyan]R[/] Remove source")
+        console.print("[cyan]F[/] Refresh cache now   [cyan]0[/] Back")
+        console.print()
+
+        choice = Prompt.ask(
+            "[bold]Select[/]", choices=["A", "R", "F", "0"], default="0"
+        ).upper()
+
+        if choice == "0":
+            return
+
+        if choice == "A":
+            link = Prompt.ask(
+                "[bold]Playlist link[/] (Spotify URL, URI, or ID)"
+            ).strip()
+            if not link:
+                _print_warning("Nothing entered, skipping")
+                _wait_for_enter()
+                continue
+            if link in links:
+                _print_warning("That playlist is already configured")
+                _wait_for_enter()
+                continue
+            config.setdefault("playlist_blacklist", []).append(link)
+            if _save_config(config):
+                _print_success("Added playlist blacklist source")
+            _wait_for_enter()
+
+        elif choice == "R":
+            if not links:
+                _print_warning("No source playlists configured")
+                _wait_for_enter()
+                continue
+            try:
+                idx = IntPrompt.ask(
+                    "[bold]Number to remove[/]",
+                    choices=[str(i + 1) for i in range(len(links))],
+                ) - 1
+            except (ValueError, IndexError):
+                continue
+            removed = links.pop(idx)
+            if _save_config(config):
+                _print_success(f"Removed '{removed}' from playlist blacklist")
+            _wait_for_enter()
+
+        elif choice == "F":
+            _print_info("Refreshing playlist blacklist cache…")
+            count = refresh_playlist_blacklist(config, db)
+            _print_success(
+                f"Playlist blacklist cache refreshed ({count} track(s) cached)"
+            )
             _wait_for_enter()
 
 

@@ -19,6 +19,7 @@ Usage:
     python sync.py --playlist friend_group    # only one playlist
     python sync.py --playlist a --playlist b  # specific playlists
     python sync.py --playlist friend_group --dry-run  # dry-run one playlist
+    python sync.py --refresh-blacklist        # rebuild playlist-blacklist cache
 """
 
 from __future__ import annotations
@@ -38,7 +39,9 @@ from notify import send_patch_notes
 from spotify_client import (
     add_tracks,
     get_app_credentials,
+    get_client_credentials_client,
     get_client_for_user,
+    get_playlist_track_ids,
     get_playlist_tracks,
     get_top_tracks,
     remove_tracks,
@@ -113,6 +116,13 @@ def load_config(path: Path) -> dict:
     max_dur = config.get("max_duration_minutes")
     if max_dur is not None and not isinstance(max_dur, int):
         raise ValueError("'max_duration_minutes' must be an integer or null")
+
+    pb = config.get("playlist_blacklist")
+    if pb is not None and not isinstance(pb, list):
+        raise ValueError("'playlist_blacklist' must be a list of playlist links")
+    for entry in pb or []:
+        if not isinstance(entry, str):
+            raise ValueError(f"'playlist_blacklist' entries must be strings, got {entry!r}")
 
     return config
 
@@ -286,7 +296,10 @@ def _extract_artist_id(entry: str) -> str | None:
 
 
 def _skip_reason(
-    track: dict, artist_blacklist: list[str] | None, max_duration_minutes: int | None
+    track: dict,
+    artist_blacklist: list[str] | None,
+    max_duration_minutes: int | None,
+    playlist_blacklist_ids: set[str] | None = None,
 ) -> str | None:
     """Return why a track should be skipped, or None if it should be kept."""
     if max_duration_minutes:
@@ -316,6 +329,9 @@ def _skip_reason(
         ):
             return "blacklist"
 
+    if playlist_blacklist_ids and track.get("id") in playlist_blacklist_ids:
+        return "playlist_blacklist"
+
     return None
 
 
@@ -327,6 +343,7 @@ def sync_playlist(
     dry_run: bool,
     artist_blacklist: list[str] | None = None,
     max_duration_minutes: int | None = None,
+    playlist_blacklist_ids: set[str] | None = None,
 ) -> None:
     name = playlist_cfg["name"]
     max_total = playlist_cfg["max_total"]
@@ -389,7 +406,9 @@ def sync_playlist(
 
         kept: list[dict] = []
         for t in tracks:
-            reason = _skip_reason(t, artist_blacklist, max_duration_minutes)
+            reason = _skip_reason(
+                t, artist_blacklist, max_duration_minutes, playlist_blacklist_ids
+            )
             if reason:
                 skipped_list.append(
                     {
@@ -550,6 +569,44 @@ def _send_webhook_if_needed(
         logger.exception("  Failed to send Discord webhook for '%s'", playlist_name)
 
 
+def refresh_playlist_blacklist(config: dict, db: TrackDatabase) -> int:
+    """Fetch every track from the configured playlist_blacklist links and
+    cache the resulting track IDs in the database.
+
+    Runs standalone (--refresh-blacklist); a normal sync only ever reads
+    this cache, never calls Spotify for it. Returns the number of unique
+    track IDs now cached.
+    """
+    links = config.get("playlist_blacklist") or []
+    if not links:
+        logger.info(
+            "No playlist_blacklist links configured - clearing the cached blacklist"
+        )
+        db.set_blacklist_tracks([])
+        return 0
+
+    try:
+        client_id, client_secret = get_app_credentials("app1")
+        sp = get_client_credentials_client(client_id, client_secret)
+    except Exception:
+        logger.exception("Could not authenticate for playlist blacklist refresh")
+        return 0
+
+    all_ids: set[str] = set()
+    for link in links:
+        try:
+            ids = get_playlist_track_ids(sp, link)
+        except Exception:
+            logger.exception("Could not read blacklist playlist %s", link)
+            continue
+        logger.info("Playlist blacklist source %s: %d tracks", link, len(ids))
+        all_ids.update(ids)
+
+    db.set_blacklist_tracks(sorted(all_ids))
+    logger.info("Playlist blacklist cached: %d unique tracks", len(all_ids))
+    return len(all_ids)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Sync shared Spotify playlists from everyone's top tracks"
@@ -573,6 +630,11 @@ def main() -> None:
         dest="playlists",
         help="Only sync this playlist (can be repeated: --playlist a --playlist b). "
              "If omitted, all playlists in config are synced.",
+    )
+    parser.add_argument(
+        "--refresh-blacklist",
+        action="store_true",
+        help="Rebuild the cached playlist-blacklist track set from config, then exit",
     )
     args = parser.parse_args()
 
@@ -606,6 +668,20 @@ def main() -> None:
     db = TrackDatabase(args.db)
     today = date.today().isoformat()
 
+    # Standalone playlist-blacklist refresh: rebuild the cached track-id
+    # set, then exit. Normal syncs never hit the Spotify API for this.
+    if args.refresh_blacklist:
+        refresh_playlist_blacklist(config, db)
+        logger.info("=== Playlist blacklist refresh finished ===")
+        return
+
+    playlist_blacklist_ids = db.get_blacklist_track_ids()
+    if playlist_blacklist_ids:
+        logger.info(
+            "Loaded %d cached playlist-blacklisted track(s)",
+            len(playlist_blacklist_ids),
+        )
+
     if args.playlists:
         known = {p["name"] for p in config["playlists"]}
         for name in args.playlists:
@@ -628,6 +704,7 @@ def main() -> None:
                 args.dry_run,
                 artist_blacklist,
                 max_duration_minutes,
+                playlist_blacklist_ids,
             )
         except Exception:
             logger.exception(

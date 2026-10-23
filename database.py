@@ -73,6 +73,13 @@ class TrackDatabase:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS playlist_blacklist_tracks (
+                    track_id TEXT PRIMARY KEY
+                )
+                """
+            )
 
     def track_exists(self, playlist_name: str, track_id: str) -> bool:
         with self._connect() as conn:
@@ -264,3 +271,34 @@ class TrackDatabase:
                 summary = {}
             result.append({"run_date": r["run_date"], "summary": summary})
         return result
+
+    def set_blacklist_tracks(self, track_ids: list[str]) -> None:
+        """Replace the cached playlist-blacklist track set with `track_ids`.
+
+        Called only by the standalone blacklist refresh (never during a
+        normal sync), so the whole set is swapped atomically in one
+        transaction.
+        """
+        with self._connect() as conn:
+            conn.execute("DELETE FROM playlist_blacklist_tracks")
+            conn.executemany(
+                "INSERT OR IGNORE INTO playlist_blacklist_tracks (track_id) VALUES (?)",
+                [(tid,) for tid in track_ids],
+            )
+
+    def get_blacklist_track_ids(self) -> set[str]:
+        """Return the full set of cached playlist-blacklisted track ids."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT track_id FROM playlist_blacklist_tracks"
+            ).fetchall()
+            return {r["track_id"] for r in rows}
+
+    def is_blacklisted_track(self, track_id: str) -> bool:
+        """Return True if `track_id` is in the cached playlist blacklist."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM playlist_blacklist_tracks WHERE track_id = ?",
+                (track_id,),
+            ).fetchone()
+            return row is not None

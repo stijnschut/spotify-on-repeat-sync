@@ -21,5 +21,6 @@
     }
   ],
   "artist_blacklist": [],
+  "playlist_blacklist": [],
   "max_duration_minutes": null
 }

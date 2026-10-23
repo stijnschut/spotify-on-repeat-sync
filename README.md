@@ -23,7 +23,7 @@ python cli.py
   3  View playlist status
   4  Manage users & playlists (edit config)
   5  Manage Discord webhooks
-  6  Settings (artist blacklist, max duration)
+  6  Settings (artist blacklist, playlist blacklist, max duration)
   7  View sync history
 
   0  Exit
@@ -139,6 +139,7 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
     }
   ],
   "artist_blacklist": [],
+  "playlist_blacklist": [],
   "max_duration_minutes": null
 }
 ```
@@ -148,6 +149,7 @@ Playlist links deliberately live in `.env` rather than `config.json` - that way 
 - Optional, per person under `users`: `"app"` (`app1` default, `app2` for a second Spotify app - see step 1), `"top_tracks_time_range"` (`short_term`/`medium_term`/`long_term`, default `short_term`), and `"top_tracks_limit"` (default 30, max 50; **recommended**: 50 for a 2-person playlist of 100).
 - Optional, top-level: `"artist_blacklist"` (artists to skip) and `"max_duration_minutes"` (drop tracks longer than this; `null` = no limit). Both can also be managed from the CLI → option 6 (Settings).
 - Each `artist_blacklist` entry can be a **name** ("P.T. Adamczyk", matched case-insensitively), an **artist ID** (`27VhXJzIph9c75cBh1e8XM`), or a **Spotify link/URI** (`https://open.spotify.com/artist/<id>` or `spotify:artist:<id>`). Using the link or ID is recommended — it's unambiguous, so no spelling worries.
+- Optional, top-level: `"playlist_blacklist"` — a list of **public** Spotify playlist links/URIs/IDs whose tracks should never be added. See "Playlist blacklist" below.
 
 ### 6. Test it
 
@@ -203,9 +205,42 @@ Could not fetch top tracks for
 ```
 
 Unlike the Discord webhook, this also shows what was **skipped and why**
-(`blacklist`, `duration`, or `cap` when there's no room) and which users
+(`blacklist`, `playlist_blacklist`, `duration`, or `cap` when there's no room) and which users
 couldn't be fetched (e.g. an invalid app credential). History is capped
 at the last 10 runs per playlist; the CLI shows the latest 3.
+
+## Playlist blacklist
+
+Sometimes you want to keep certain songs out of the shared playlists
+altogether — e.g. a "hold" playlist of tracks someone has vetoed. Instead
+of blacklisting individual artists, you can point the project at one or
+more **public** Spotify playlists and blacklist every track in them.
+
+```json
+"playlist_blacklist": [
+  "https://open.spotify.com/playlist/3cEYpjA9oz9GiPac4AsH4n",
+  "spotify:playlist:5gNlB4m9Z8q0Wz1hDc7fK"
+]
+```
+
+Entries can be a Spotify link, a `spotify:playlist:<id>` URI, or a bare
+playlist ID.
+
+The blacklist is **cached** in the database, so a normal sync never makes
+an extra Spotify API call for it. You refresh the cache separately —
+manually, or on a schedule on the NAS — with:
+
+```bash
+python sync.py --refresh-blacklist
+```
+
+This reads every playlist in `playlist_blacklist`, caches all of their
+track IDs, and then exits. The next normal sync skips any matching track
+with the reason `playlist_blacklist` (visible in option 7 / sync history).
+
+Manage it from the CLI too: `python cli.py` → option 6 (Settings) → **P**
+(Playlist blacklist), where you can add/remove source playlists or refresh
+the cache immediately.
 
 ## Discord notifications (patch notes)
 
